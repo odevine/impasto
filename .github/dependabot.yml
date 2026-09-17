@@ -1,0 +1,17 @@
+version: 2
+updates:
+  # Keep the GitHub Actions used in workflows up to date
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+
+  # No third-party Go modules today, but this keeps them current if any are added
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: deps

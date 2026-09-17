@@ -1,0 +1,21 @@
+# Test and build binaries
+*.test
+*.exe
+
+# Coverage and profiling output
+coverage.out
+coverage.txt
+coverage.html
+*.prof
+cpu.out
+mem.out
+
+# OS and editor cruft
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Note: examples/out/*.png and canvas/testdata/golden.png are committed on
+# purpose. The example images are referenced by the READMEs and the golden image
+# is the render regression reference, so neither is ignored here.
