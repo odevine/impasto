@@ -41,7 +41,7 @@ fuzz:
 
 # Regenerate the example images
 examples:
-	@for d in blendmodes gradients effects paths showcase; do go run ./examples/$$d; done
+	@for d in blendmodes gradients effects paths showcase banner; do go run ./examples/$$d; done
 
 # Enable the repo's git hooks (runs fmt, vet, and tests before each commit)
 hooks:

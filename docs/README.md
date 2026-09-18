@@ -44,7 +44,7 @@ A few things span packages and are documented where they bite hardest:
 
 ## Seeing it work
 
-The [examples directory](../examples/) has five runnable programs that render
+The [examples directory](../examples/) has six runnable programs that render
 PNGs, with a [walk-through](../examples/README.md) covering every blend mode,
 gradient type, effect, and stroke feature with the image next to it. If you
 learn better from pictures than prose, start there instead.

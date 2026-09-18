@@ -1,6 +1,6 @@
 # Examples
 
-Five standalone programs, each rendering a PNG into `examples/out/`. Run one with:
+Six standalone programs, each rendering a PNG into `examples/out/`. Run one with:
 
 ```
 go run ./examples/blendmodes
@@ -8,12 +8,13 @@ go run ./examples/gradients
 go run ./examples/effects
 go run ./examples/paths
 go run ./examples/showcase
+go run ./examples/banner
 ```
 
 Or render them all:
 
 ```
-for d in blendmodes gradients effects paths showcase; do go run ./examples/$d; done
+for d in blendmodes gradients effects paths showcase banner; do go run ./examples/$d; done
 ```
 
 `internal/demo` holds the shared helpers (PNG saving, solid and checker fills,
@@ -42,6 +43,44 @@ A single poster that combines most of the library at once. Layers, bottom to top
 
 It also exercises vector masks, a pass-through root group, and the fixed
 effect-stacking order.
+
+---
+
+## Banner
+
+[`banner/main.go`](banner/main.go) → [`out/banner.png`](out/banner.png)
+
+![impasto banner](out/banner.png)
+
+The banner at the top of the [project README](../README.md), rendered with
+impasto itself. The lettering is Limelight, converted to outlines and fed
+through `demo.SVGPath` into the `path` package, so nothing here needs a font at
+render time.
+
+Bottom to top:
+
+1. **Background** a diagonal linear gradient through navy, indigo, and plum.
+2. **Glows** three radial gradients that fade to transparent at the rim, so they
+   need no mask, composited with **Screen** so they add light.
+3. **Vignette** another radial gradient, transparent at the center and near
+   black at the edge, holding attention on the middle.
+4. **Wordmark** a solid white fill shaped by a vector mask of the lettering,
+   carrying a **drop shadow**, an **outer glow**, a warm **gradient overlay**, a
+   **bevel**, and a white **outer stroke**.
+5. **Rule** a dashed line under the word, round-capped so each dash reads as a
+   dot.
+
+The wordmark's effects are listed in an arbitrary order in the source, which
+makes no difference to the output: `canvas` sorts them into the fixed stacking
+order before compositing.
+
+Rendering is deterministic, so regenerating the banner on any machine produces a
+byte-identical PNG:
+
+```
+go run ./examples/banner && shasum -a 256 examples/out/banner.png
+GOMAXPROCS=1 go run ./examples/banner && shasum -a 256 examples/out/banner.png
+```
 
 ---
 

@@ -1,5 +1,7 @@
 # impasto
 
+![impasto, a pure-Go library for Photoshop-style layered image compositing](examples/out/banner.png)
+
 [![CI](https://github.com/odevine/impasto/actions/workflows/ci.yml/badge.svg)](https://github.com/odevine/impasto/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/odevine/impasto.svg)](https://pkg.go.dev/github.com/odevine/impasto)
 
@@ -136,6 +138,7 @@ effect, and gradient with the image beside it.
 | [`effects`](examples/effects)       | The eight layer styles on a badge                             |
 | [`paths`](examples/paths)           | Stroke caps, joins, dashes, fill rules, and beziers           |
 | [`showcase`](examples/showcase)     | A poster combining gradients, masks, groups, and every effect |
+| [`banner`](examples/banner)         | The README banner at the top of this page                     |
 
 Run one with `go run ./examples/<name>`, or regenerate all of them with
 `make examples`.
