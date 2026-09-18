@@ -1,8 +1,8 @@
 // Package path builds bezier paths and rasterizes them with anti-aliased
 // scanline coverage. It supports both fill (nonzero and even-odd winding) and
-// stroking, the piece missing from the standard library's vector rasterizer.
-// Coverage is produced at float32 precision so gradients and effects downstream
-// do not inherit 8-bit banding.
+// stroking, which golang.org/x/image/vector does not cover. Coverage is produced
+// at float32 precision so gradients and effects downstream do not inherit 8-bit
+// banding.
 package path
 
 import "math"

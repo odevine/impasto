@@ -10,14 +10,16 @@ import (
 // result. The source is taken as-is, apply opacity by scaling all four of its
 // components before calling this.
 //
-// The math follows the W3C/ISO general compositing formula. The blend function
-// B only changes the color term, the alpha term is plain source-over:
+// The math follows the general compositing formula shared by the W3C and ISO
+// specs. The blend function B only changes the color term, the alpha term is
+// plain source-over:
 //
 //	Co = as(1-ab)Cs + as*ab*B(Cb,Cs) + (1-as)ab*Cb
 //	ao = as + (1-as)ab
 //
 // B needs straight color, so the premultiplied inputs are divided out first and
 // the result comes back premultiplied.
+// See https://www.w3.org/TR/compositing-1/#generalformula
 func BlendPixel(cb, cs [4]float32, m Mode) [4]float32 {
 	ab := cb[3]
 	as := cs[3]

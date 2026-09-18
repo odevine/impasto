@@ -1,7 +1,7 @@
 // Package raster is the substrate every other package builds on. It defines the
 // working pixel representation (float32, premultiplied alpha, linear light) and
-// the only sanctioned bridge to and from standard library images. No other
-// package should touch pixels without going through a Buffer.
+// the conversions to and from standard library images. Pixels reach the working
+// space through a Buffer rather than any other route.
 package raster
 
 import (
@@ -11,7 +11,7 @@ import (
 
 // MaxDimension caps any single buffer edge. Untrusted image headers can declare
 // enormous dimensions to force a huge allocation, so callers validate against
-// this before allocating, never after. See the security notes in the spec
+// this before allocating, never after
 const MaxDimension = 1 << 16
 
 // ErrDimensions reports a buffer size that is negative, zero, or beyond the

@@ -91,8 +91,8 @@ func (s *InnerShadow) Render(layer *raster.Buffer) []Rendered {
 }
 
 // modeOr returns m unless it is the zero value Normal, in which case the
-// effect's documented default applies. Callers wanting Normal explicitly get the
-// default of that effect, which for shadows and glows is what they want anyway
+// effect's documented default applies. A caller asking for Normal explicitly
+// gets that default instead, which is the tradeoff for a useful zero value
 func modeOr(m, def blend.Mode) blend.Mode {
 	if m == blend.Normal {
 		return def

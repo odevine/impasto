@@ -5,6 +5,7 @@ import "math"
 // These are the per-channel separable blend functions B(cb, cs) from ISO
 // 32000-2 section 11.3.5.2, operating on straight (non-premultiplied) color
 // values in [0,1]. cb is the backdrop, cs is the source.
+// See https://www.w3.org/TR/compositing-1/#blendingseparable
 
 func mul(cb, cs float32) float32    { return cb * cs }
 func screen(cb, cs float32) float32 { return cb + cs - cb*cs }
@@ -25,7 +26,8 @@ func overlay(cb, cs float32) float32 {
 }
 
 // softLight uses the piecewise D(x) helper for its upper branch, matching the
-// spec exactly rather than the simpler approximations some libraries use
+// ISO formula rather than a closed-form approximation.
+// See https://www.w3.org/TR/compositing-1/#blendingsoftlight
 func softLight(cb, cs float32) float32 {
 	if cs <= 0.5 {
 		return cb - (1-2*cs)*cb*(1-cb)

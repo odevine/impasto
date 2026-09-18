@@ -3,10 +3,11 @@ package blend
 // The non-separable modes (Hue, Saturation, Color, Luminosity) act on the whole
 // RGB triple at once. ISO 32000-2 section 11.3.5.3 defines them in terms of four
 // helpers, so each mode is a short composition once the helpers exist.
+// See https://www.w3.org/TR/compositing-1/#blendingnonseparable
 
 type rgb [3]float32
 
-// lum is the luminance of a color using the spec's fixed coefficients
+// lum is the luminance of a color using the coefficients ISO 32000-2 fixes
 func lum(c rgb) float32 {
 	return 0.3*c[0] + 0.59*c[1] + 0.11*c[2]
 }

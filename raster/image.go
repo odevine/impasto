@@ -261,7 +261,7 @@ var bayer8 = [64]float32{
 
 // ditherOffset returns a per-pixel code-space offset in [-0.5,0.5) drawn from
 // the Bayer matrix. Applying it only at quantization keeps the float32 working
-// buffer undithered as the spec requires
+// buffer undithered
 func ditherOffset(x, y int) float32 {
 	return (bayer8[(y&7)*8+(x&7)]+0.5)/64.0 - 0.5
 }

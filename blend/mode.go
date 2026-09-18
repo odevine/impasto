@@ -1,8 +1,12 @@
 // Package blend implements the Photoshop blend modes as pure functions. The
-// formulas come straight from ISO 32000-2 (the PDF spec) section 11.3.5, which
-// standardized exactly this set, so the math is a transcription of a published
-// reference rather than something reverse engineered from screenshots. The
-// package knows nothing about layers or masks, it is only the color math.
+// formulas come straight from [ISO 32000-2] section 11.3.5, which standardizes
+// exactly this set, so the math is a transcription of a published reference.
+// [W3C Compositing and Blending] restates the same formulas with an anchor per
+// mode. The package knows nothing about layers or masks, it is only the color
+// math.
+//
+// [ISO 32000-2]: https://pdfa.org/sponsored-standards/
+// [W3C Compositing and Blending]: https://www.w3.org/TR/compositing-1/#blending
 package blend
 
 // Mode selects a blend function. The ordering is fixed and part of the API,

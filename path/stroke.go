@@ -37,7 +37,7 @@ const DefaultMiterLimit = 4
 // Stroke converts a path into a fillable outline. Fill the result with NonZero
 // to paint the stroke. The outline is built from many convex pieces (a quad per
 // segment, a shape per join, a shape per cap) all wound the same way, so nonzero
-// winding unions them cleanly rather than requiring fragile edge stitching.
+// winding unions them cleanly without any edge stitching.
 func Stroke(p *Path, style StrokeStyle) *Path {
 	hw := style.Width * 0.5
 	if hw <= 0 {

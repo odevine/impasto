@@ -45,8 +45,9 @@ func BenchmarkRenderMidsize(b *testing.B) {
 	}
 }
 
-// BenchmarkRenderPrintSize is the spec's baseline target: a high-DPI print canvas
-// with many layers and active effects, aimed at well under a second per render
+// BenchmarkRenderPrintSize covers the heaviest realistic workload: a high-DPI
+// print canvas with many layers and active effects, aimed at well under a
+// second per render
 func BenchmarkRenderPrintSize(b *testing.B) {
 	d := buildDoc(3300, 4400)
 	b.ResetTimer()
