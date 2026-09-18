@@ -89,6 +89,25 @@ png.Encode(w, out.ToImage(8))
 
 Layer content is document-sized. Place a smaller image with `canvas.Place`.
 
+## Examples
+
+The [`examples/`](examples/) directory has runnable programs that render PNGs
+showing off each part of the library. See [examples/README.md](examples/README.md)
+for a full walk-through of every mode, effect, and gradient.
+
+[![Showcase poster](examples/out/showcase.png)](examples/README.md#showcase)
+
+| Program | Renders |
+|---------|---------|
+| [`blendmodes`](examples/blendmodes) | All 16 blend modes as a chart |
+| [`gradients`](examples/gradients) | The five gradient types plus a transparency fade |
+| [`effects`](examples/effects) | The eight layer styles on a badge |
+| [`paths`](examples/paths) | Stroke caps, joins, dashes, fill rules, and beziers |
+| [`showcase`](examples/showcase) | A poster combining gradients, masks, groups, and every effect |
+
+Run one with `go run ./examples/<name>`, or regenerate all of them with
+`make examples`.
+
 ## Text
 
 impasto never shapes text. Rasterize glyph outlines yourself (for example with
