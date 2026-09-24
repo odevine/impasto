@@ -12,6 +12,7 @@ standard library.
 
 This is just a library and not a full application, so there is no CLI, and no
 opinion about file formats beyond decoding into and encoding out of `image.Image`.
+The one exception is the optional `mpcfill` package, which nothing else imports.
 This way, a poster renderer, a game's UI layer, or a template service should all
 find it equally usable.
 
@@ -57,6 +58,7 @@ Lower layers never import higher ones, so each package works on its own.
 | `blur`     | 3-pass box blur as a separable Gaussian approximation                                              |
 | `effects`  | The declarative layer styles                                                                       |
 | `canvas`   | Layer stack, groups, and `Render`                                                                  |
+| `mpcfill`  | Writes rendered cards as an [MPC Autofill](https://github.com/chilli-axe/mpc-autofill) project     |
 
 Most callers import only `canvas`.
 
@@ -118,6 +120,7 @@ the obvious thing might be the wrong thing.
 | [blur](docs/blur.md)         | The three-box Gaussian approximation, sigma vs radius    |
 | [effects](docs/effects.md)   | The eight layer styles, their parameters, stacking order |
 | [canvas](docs/canvas.md)     | Documents, layers, groups, clipping, rendering           |
+| [mpcfill](docs/mpcfill.md)   | MPC Autofill projects, and why names get rewritten       |
 
 New to the library? Read [canvas](docs/canvas.md), then
 [raster](docs/raster.md).

@@ -81,3 +81,6 @@ jobs:
 
       - name: Fuzz gradient
         run: go test ./gradient/ -run='^$' -fuzz=FuzzGradient -fuzztime=30s
+
+      - name: Fuzz mpcfill file names
+        run: go test ./mpcfill/ -run='^$' -fuzz=FuzzStem -fuzztime=30s

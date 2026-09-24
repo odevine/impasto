@@ -29,6 +29,7 @@ be used on its own.
 | [blur](blur.md)         | The three-box Gaussian approximation, sigma vs radius                        |
 | [effects](effects.md)   | The eight layer styles, their parameters, stacking order                     |
 | [canvas](canvas.md)     | Documents, layers, groups, clipping, rendering                               |
+| [mpcfill](mpcfill.md)   | Writing cards as an MPC Autofill project, and the rules that shape it        |
 
 ## Cross-cutting topics
 
