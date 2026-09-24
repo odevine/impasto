@@ -38,6 +38,7 @@ fuzz:
 	go test ./path/ -run='^$$' -fuzz=FuzzRasterize -fuzztime=30s
 	go test ./path/ -run='^$$' -fuzz=FuzzStroke -fuzztime=30s
 	go test ./gradient/ -run='^$$' -fuzz=FuzzGradient -fuzztime=30s
+	go test ./mpcfill/ -run='^$$' -fuzz=FuzzStem -fuzztime=30s
 
 # Regenerate the example images
 examples:
