@@ -98,10 +98,10 @@ func renderGroup(g *Group, backdrop *raster.Buffer) {
 // base so clip-to-below layers attach to the layer beneath them
 func renderChildren(nodes []Node, backdrop *raster.Buffer) {
 	var clipBase []float32
-	for _, n := range nodes {
+	for i, n := range nodes {
 		switch node := n.(type) {
 		case *Layer:
-			clipBase = renderLayer(node, backdrop, clipBase)
+			clipBase = renderLayer(node, backdrop, clipBase, nextClips(nodes, i))
 		case *Group:
 			renderGroup(node, backdrop)
 			// A nested group does not serve as a clip base
@@ -110,24 +110,41 @@ func renderChildren(nodes []Node, backdrop *raster.Buffer) {
 	}
 }
 
+// nextClips reports whether the node after index i is a clip-to-below layer
+func nextClips(nodes []Node, i int) bool {
+	if i+1 >= len(nodes) {
+		return false
+	}
+	next, ok := nodes[i+1].(*Layer)
+	return ok && next.ClipToBelow
+}
+
 // renderLayer composites one layer with its effects onto backdrop, and returns
-// the alpha field a following clip-to-below layer should clip against
-func renderLayer(l *Layer, backdrop *raster.Buffer, clipBase []float32) []float32 {
+// the alpha field a following clip-to-below layer should clip against. The field
+// is only built when needBase is set
+func renderLayer(l *Layer, backdrop *raster.Buffer, clipBase []float32, needBase bool) []float32 {
 	if l.Content == nil {
 		return clipBase
 	}
-	// Never mutate the caller's content, effects and masks work on a copy
-	content := l.Content.Clone()
+	clipped := l.ClipToBelow && clipBase != nil
+	// Only masks and clipping write to the content, so the caller's buffer is copied just for those
+	content := l.Content
+	if l.Mask != nil || clipped {
+		content = content.Clone()
+	}
 	if l.Mask != nil {
 		mask.Apply(content, l.Mask)
 	}
 
 	nextBase := clipBase
-	if l.ClipToBelow && clipBase != nil {
+	if clipped {
 		multiplyAlpha(content, clipBase)
 	} else {
 		// This layer becomes the base that subsequent clip layers attach to
-		nextBase = extractAlpha(content)
+		nextBase = nil
+		if needBase {
+			nextBase = extractAlpha(content)
+		}
 	}
 
 	op := opacityOr(l.Opacity)
