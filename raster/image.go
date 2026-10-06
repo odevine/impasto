@@ -28,6 +28,8 @@ func FromImage(img image.Image) (*Buffer, error) {
 		buf.fromNRGBA(src)
 	case *image.NRGBA64:
 		buf.fromNRGBA64(src)
+	case *image.RGBA:
+		buf.fromRGBA(src)
 	case *image.Gray:
 		buf.fromGray(src)
 	case *image.Gray16:
@@ -68,6 +70,39 @@ func (buf *Buffer) fromNRGBA(src *image.NRGBA) {
 			buf.Pix[di+1] = g * a
 			buf.Pix[di+2] = bl * a
 			buf.Pix[di+3] = a
+			si += 4
+			di += 4
+		}
+	}
+}
+
+// fromRGBA ingests premultiplied 8-bit sRGB, the type the standard scalers
+// produce. It recovers straight 16-bit color the way color.NRGBA64Model does,
+// so the result matches fromGeneric
+func (buf *Buffer) fromRGBA(src *image.RGBA) {
+	b := src.Bounds()
+	di := 0
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		si := src.PixOffset(b.Min.X, y)
+		for x := b.Min.X; x < b.Max.X; x++ {
+			a16 := uint32(src.Pix[si+3]) * 0x101
+			if a16 == 0 {
+				buf.Pix[di], buf.Pix[di+1], buf.Pix[di+2], buf.Pix[di+3] = 0, 0, 0, 0
+			} else {
+				r16 := uint32(src.Pix[si]) * 0x101
+				g16 := uint32(src.Pix[si+1]) * 0x101
+				b16 := uint32(src.Pix[si+2]) * 0x101
+				if a16 != 0xffff {
+					r16 = r16 * 0xffff / a16
+					g16 = g16 * 0xffff / a16
+					b16 = b16 * 0xffff / a16
+				}
+				a := float32(a16) / 65535.0
+				buf.Pix[di] = srgb16ToLinearLUT[uint16(r16)] * a
+				buf.Pix[di+1] = srgb16ToLinearLUT[uint16(g16)] * a
+				buf.Pix[di+2] = srgb16ToLinearLUT[uint16(b16)] * a
+				buf.Pix[di+3] = a
+			}
 			si += 4
 			di += 4
 		}
@@ -173,9 +208,9 @@ func (b *Buffer) toNRGBA() *image.NRGBA {
 		for x := 0; x < b.Width; x++ {
 			r, g, bl, a := unpremultiply(b.Pix[si], b.Pix[si+1], b.Pix[si+2], b.Pix[si+3])
 			d := ditherOffset(x, y)
-			dst.Pix[di] = quantize8(LinearToSRGB(r), d)
-			dst.Pix[di+1] = quantize8(LinearToSRGB(g), d)
-			dst.Pix[di+2] = quantize8(LinearToSRGB(bl), d)
+			dst.Pix[di] = encode8(r, d)
+			dst.Pix[di+1] = encode8(g, d)
+			dst.Pix[di+2] = encode8(bl, d)
 			dst.Pix[di+3] = quantize8(a, d)
 			si += 4
 			di += 4
@@ -233,6 +268,42 @@ func quantize8(v, dither float32) uint8 {
 		return 255
 	}
 	return uint8(q + 0.5)
+}
+
+// srgbSteps is the number of linear segments the encode table spans over [0,1]
+const srgbSteps = 4096
+
+// encodeMargin is how close, in codes, an interpolated value may sit to a
+// rounding boundary before encode8 defers to the exact path. It is several
+// times the largest interpolation error the table produces
+const encodeMargin = 0.02
+
+// srgbEncodeTable holds 255 times the sRGB encoding of i/srgbSteps, with one
+// spare entry so the last segment can interpolate
+var srgbEncodeTable [srgbSteps + 2]float32
+
+func init() {
+	for i := range srgbEncodeTable {
+		srgbEncodeTable[i] = float32(255 * float64(LinearToSRGB(float32(min(i, srgbSteps))/srgbSteps)))
+	}
+}
+
+// encode8 returns quantize8(LinearToSRGB(c), d) without evaluating the power
+// function for most inputs. It interpolates a table to find the code and only
+// computes the exact value when the table leaves the rounding in doubt, so the
+// result always matches the exact path
+func encode8(c, d float32) uint8 {
+	if !(c > 0.0031308 && c <= 1) {
+		return quantize8(LinearToSRGB(c), d)
+	}
+	x := c * srgbSteps
+	i := int(x)
+	t := srgbEncodeTable[i] + (srgbEncodeTable[i+1]-srgbEncodeTable[i])*(x-float32(i)) + d + 0.5
+	k := int(t)
+	if f := t - float32(k); f < encodeMargin || f > 1-encodeMargin {
+		return quantize8(LinearToSRGB(c), d)
+	}
+	return uint8(min(k, 255))
 }
 
 // quantize16 rounds an sRGB-encoded value in [0,1] to a 16-bit code

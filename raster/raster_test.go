@@ -1,9 +1,11 @@
 package raster
 
 import (
+	"bytes"
 	"image"
 	"image/color"
 	"math"
+	"math/rand/v2"
 	"testing"
 )
 
@@ -131,4 +133,166 @@ func diff8(a, b uint8) int {
 		return -d
 	}
 	return d
+}
+
+// encode8 must agree with the exact path for every input, so the table is only
+// ever a shortcut
+func TestEncode8MatchesExactPath(t *testing.T) {
+	check := func(c float32) {
+		for d := 0; d < 64; d++ {
+			off := ditherOffset(d&7, d>>3)
+			if got, want := encode8(c, off), quantize8(LinearToSRGB(c), off); got != want {
+				t.Fatalf("c=%v dither=%v: got %d, want %d", c, off, got, want)
+			}
+		}
+	}
+	for i := 0; i <= 200000; i++ {
+		check(float32(i) / 200000)
+	}
+	// Dense through the steep low end, where the table is least accurate
+	for i := 0; i <= 100000; i++ {
+		check(0.003 + float32(i)*1e-7)
+	}
+	for k := 0; k < 256; k++ {
+		c := SRGBToLinear(float32(k) / 255)
+		for _, v := range []float32{c, math.Nextafter32(c, 0), math.Nextafter32(c, 1)} {
+			check(v)
+		}
+	}
+	for _, c := range []float32{-1, 0, 1, 2, float32(math.NaN()), float32(math.Inf(1))} {
+		off := ditherOffset(3, 5)
+		if got, want := encode8(c, off), quantize8(LinearToSRGB(c), off); got != want {
+			t.Fatalf("c=%v: got %d, want %d", c, got, want)
+		}
+	}
+}
+
+// The table's interpolation error stays well inside the margin that decides
+// when encode8 must take the exact path
+func TestEncodeTableErrorWithinMargin(t *testing.T) {
+	worst := 0.0
+	for i := 0; i < 2_000_000; i++ {
+		c := 0.0031308 + float64(i)/2_000_000*(1-0.0031308)
+		x := c * srgbSteps
+		j := int(x)
+		approx := float64(srgbEncodeTable[j]) + float64(srgbEncodeTable[j+1]-srgbEncodeTable[j])*(x-float64(j))
+		exact := 255 * (1.055*math.Pow(c, 1/2.4) - 0.055)
+		worst = max(worst, math.Abs(approx-exact))
+	}
+	if worst > encodeMargin/3 {
+		t.Errorf("interpolation error %.5f codes, margin %.5f", worst, encodeMargin)
+	}
+}
+
+func benchBuffer(b *testing.B) *Buffer {
+	b.Helper()
+	buf, err := NewBuffer(1200, 1600)
+	if err != nil {
+		b.Fatal(err)
+	}
+	for i := 0; i < len(buf.Pix); i += 4 {
+		v := float32(i/4%997) / 997
+		a := float32(1)
+		if i/4%5 == 0 {
+			a = 0.6
+		}
+		buf.Pix[i], buf.Pix[i+1], buf.Pix[i+2], buf.Pix[i+3] = v*a, v*v*a, (1-v)*a, a
+	}
+	return buf
+}
+
+func BenchmarkToImage8(b *testing.B) {
+	buf := benchBuffer(b)
+	b.SetBytes(int64(buf.Width * buf.Height * 4))
+	for b.Loop() {
+		buf.ToImage(8)
+	}
+}
+
+// refToNRGBA is toNRGBA with the exact transfer function on every channel
+func refToNRGBA(b *Buffer) *image.NRGBA {
+	dst := image.NewNRGBA(image.Rect(0, 0, b.Width, b.Height))
+	si := 0
+	for y := 0; y < b.Height; y++ {
+		di := dst.PixOffset(0, y)
+		for x := 0; x < b.Width; x++ {
+			r, g, bl, a := unpremultiply(b.Pix[si], b.Pix[si+1], b.Pix[si+2], b.Pix[si+3])
+			d := ditherOffset(x, y)
+			dst.Pix[di] = quantize8(LinearToSRGB(r), d)
+			dst.Pix[di+1] = quantize8(LinearToSRGB(g), d)
+			dst.Pix[di+2] = quantize8(LinearToSRGB(bl), d)
+			dst.Pix[di+3] = quantize8(a, d)
+			si += 4
+			di += 4
+		}
+	}
+	return dst
+}
+
+func TestToImage8MatchesExactPath(t *testing.T) {
+	buf, err := NewBuffer(257, 131)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rng := rand.New(rand.NewPCG(1, 2))
+	for i := 0; i < len(buf.Pix); i += 4 {
+		a := rng.Float32()
+		switch rng.IntN(4) {
+		case 0:
+			a = 1
+		case 1:
+			a = 0
+		}
+		// Values past the alpha and below zero are valid after blend modes
+		buf.Pix[i] = (rng.Float32()*1.2 - 0.1) * a
+		buf.Pix[i+1] = rng.Float32() * a * a
+		buf.Pix[i+2] = rng.Float32() * a
+		buf.Pix[i+3] = a
+	}
+	got := buf.ToImage(8).(*image.NRGBA)
+	want := refToNRGBA(buf)
+	if !bytes.Equal(got.Pix, want.Pix) {
+		t.Fatal("ToImage(8) differs from the exact transfer function")
+	}
+}
+
+func BenchmarkToImage8Exact(b *testing.B) {
+	buf := benchBuffer(b)
+	b.SetBytes(int64(buf.Width * buf.Height * 4))
+	for b.Loop() {
+		refToNRGBA(buf)
+	}
+}
+
+func TestFromRGBAMatchesGeneric(t *testing.T) {
+	img := image.NewRGBA(image.Rect(3, 2, 130, 91))
+	rng := rand.New(rand.NewPCG(3, 4))
+	for i := range img.Pix {
+		img.Pix[i] = uint8(rng.UintN(256))
+	}
+	// Alpha runs of zero and full, plus bytes that are not valid premultiplied
+	for i := 3; i < len(img.Pix); i += 4 * 7 {
+		img.Pix[i] = []uint8{0, 255}[rng.IntN(2)]
+	}
+	got, err := FromImage(img)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := NewBuffer(img.Bounds().Dx(), img.Bounds().Dy())
+	want.fromGeneric(img)
+	for i := range got.Pix {
+		if got.Pix[i] != want.Pix[i] {
+			t.Fatalf("sample %d: got %v, want %v", i, got.Pix[i], want.Pix[i])
+		}
+	}
+}
+
+func BenchmarkFromRGBA(b *testing.B) {
+	img := image.NewRGBA(image.Rect(0, 0, 1200, 1600))
+	for i := range img.Pix {
+		img.Pix[i] = uint8(i)
+	}
+	for b.Loop() {
+		FromImage(img)
+	}
 }
