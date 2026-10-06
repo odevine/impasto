@@ -84,9 +84,10 @@ smaller buffer. When any is not, the layer is expanded to the whole document
 first, so such effects behave as they do for a document-sized layer.
 
 A bounded layer renders the same as the same pixels placed into a document-sized
-buffer. Layers with a blurred or offset drop shadow can differ in the last bit of
-a float because the shadow is computed on a differently sized buffer, and the
-8-bit output is identical.
+buffer. Layers with a drop shadow can differ by about 1e-6 in a float, because
+the shadow is computed on a differently sized buffer and its offset and blur round
+differently. In 8-bit output that shows as a byte that is one level apart, on a
+very small share of pixels.
 
 ### Placing content
 

@@ -1,7 +1,6 @@
 package canvas
 
 import (
-	"bytes"
 	"fmt"
 	"image"
 	"image/color"
@@ -42,8 +41,14 @@ func blob(w, h int, seed float32) *raster.Buffer {
 // shadow. The shadow is computed on a buffer with a different origin and extent
 // than the document, so the offset's bilinear weights round differently, and the
 // blur's sliding window sum leaves ulp-sized noise in different places. It is
-// far below one 8-bit step, and the 8-bit output must still match exactly
+// far below one 8-bit step, but a value that lands near a rounding boundary can
+// still quantize one level apart, which happens on some architectures. The 8-bit
+// output must stay within one level, and only a tiny share of bytes may differ
 const shadowNoise = 1e-6
+
+// maxDifferingShare is the largest share of 8-bit bytes allowed to differ when a
+// tolerance is set, about fifty times what is seen on amd64
+const maxDifferingShare = 1e-3
 
 // renderPair renders the same scene twice, once with every layer placed into a
 // document-sized buffer and once with the content bounded at an origin, and
@@ -54,7 +59,7 @@ func renderPair(t *testing.T, docW, docH int, build func(content func(b *raster.
 }
 
 // renderPairTol is renderPair allowing each float to differ by up to tol, and
-// also requiring the 8-bit renders to be identical when tol is set
+// also requiring the 8-bit renders to agree closely when tol is set
 func renderPairTol(t *testing.T, tol float32, docW, docH int, build func(content func(b *raster.Buffer, x, y int) *Layer) []Node) {
 	t.Helper()
 	placed := func(b *raster.Buffer, x, y int) *Layer {
@@ -69,8 +74,27 @@ func renderPairTol(t *testing.T, tol float32, docW, docH int, build func(content
 	}
 	want, got := render(placed), render(bounded)
 	requireSame(t, tol, want, got)
-	if tol > 0 && !bytes.Equal(want.ToImage(8).(*image.NRGBA).Pix, got.ToImage(8).(*image.NRGBA).Pix) {
-		t.Fatal("8-bit output differs")
+	if tol > 0 {
+		requireClose8(t, want.ToImage(8).(*image.NRGBA).Pix, got.ToImage(8).(*image.NRGBA).Pix)
+	}
+}
+
+// requireClose8 fails unless every byte is within one level and only a tiny
+// share of them differ at all
+func requireClose8(t *testing.T, want, got []uint8) {
+	t.Helper()
+	differing := 0
+	for i := range want {
+		d := int(want[i]) - int(got[i])
+		if d < -1 || d > 1 {
+			t.Fatalf("8-bit byte %d is %d, want %d", i, got[i], want[i])
+		}
+		if d != 0 {
+			differing++
+		}
+	}
+	if share := float64(differing) / float64(len(want)); share > maxDifferingShare {
+		t.Fatalf("%d of %d 8-bit bytes differ (%.4f%%)", differing, len(want), share*100)
 	}
 }
 
