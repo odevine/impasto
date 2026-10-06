@@ -131,7 +131,7 @@ Blending each small layer only over its own rect should also reduce compositing 
 
 Equivalence is the main requirement, so most tests compare two renders of the same scene.
 
-- **Bounded against placed.** Render a scene once with document-sized `Place`d layers and once with bounded layers and `Origin`. Assert identical bytes. Cover a layer at each document edge and corner, one partly outside the document, and a layer with a `Mask`.
+- **Bounded against placed.** Render a scene once with document-sized `Place`d layers and once with bounded layers and `Origin`. Assert identical floats, except for bounded shadows, which round differently on a differently sized buffer. For those, assert floats within 1e-6 and 8-bit output within one level with only a tiny share of bytes differing, since a value near a rounding boundary can quantize one level apart on some architectures. Cover a layer at each document edge and corner, one partly outside the document, and a layer with a `Mask`.
 - **Effect bleed.** Drop shadows at several distances and blur radii on a bounded layer, with the shadow reaching exactly the `Bleed()` limit. Compare against the expanded-to-document result. Include a layer with an effect that does not implement `Bounded` and check it falls back.
 - **Clip-to-below.** A clipped layer over a bounded base, with the two rects overlapping partially, fully and not at all.
 - **Lazy against eager.** The same scene with `Content` and with `Load` must match. A `Load` error stops the render and returns an error that names the layer. A `Load` that returns a buffer canvas then mutates must not disturb a second render that reuses the same source.

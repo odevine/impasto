@@ -98,6 +98,20 @@ below returns immediately.
 Since most layers in most documents are Normal, this is the case worth
 optimizing.
 
+### CompositeRect
+
+```go
+blend.CompositeRect(dst, src *raster.Buffer, origin image.Point, m Mode, opacity float32)
+```
+
+`CompositeRect` blends `src` over the part of `dst` that `src` covers when its
+top-left sits at `origin`, clipped to `dst`, and touches nothing else. The
+buffers may be different sizes, and `src` may hang off any edge of `dst` or lie
+entirely outside it. Mode, opacity and banding work as in `Composite`, which is
+`CompositeRect` with a zero origin and a size check, so the two give the same
+result for equal-size buffers. `canvas` uses it to blend a layer over only the
+region its content covers.
+
 ## The modes
 
 Values are a fixed `iota` ordering that is part of the API. You can persist the

@@ -155,3 +155,28 @@ func floor(v float32) float32 {
 	}
 	return float32(i)
 }
+
+// Bounded is implemented by effects whose output stays within a known distance
+// of the layer's content. Canvas uses it to run such effects on a buffer only
+// slightly larger than the content instead of the whole document. An effect that
+// does not implement it may write anywhere, or depend on the content's position
+// in the document, so canvas runs it on a document-sized buffer
+type Bounded interface {
+	// Bleed is how many pixels past the content's edges the effect can write
+	Bleed() int
+}
+
+// MaxBleed returns the largest Bleed across the effects and whether every one of
+// them is Bounded. With no effects it returns 0 and true
+func MaxBleed(list []Effect) (bleed int, ok bool) {
+	for _, e := range list {
+		b, isBounded := e.(Bounded)
+		if !isBounded {
+			return 0, false
+		}
+		if n := b.Bleed(); n > bleed {
+			bleed = n
+		}
+	}
+	return bleed, true
+}

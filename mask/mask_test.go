@@ -1,6 +1,7 @@
 package mask
 
 import (
+	"image"
 	"testing"
 
 	"github.com/odevine/impasto/raster"
@@ -57,4 +58,32 @@ func TestApplyAttenuatesPremultiplied(t *testing.T) {
 func eq(a, b float32) bool {
 	d := a - b
 	return d < 1e-6 && d > -1e-6
+}
+
+// TestApplyAtReadsDocumentCoordinates requires a buffer cut from a larger area to
+// be masked as its pixels would be in place
+func TestApplyAtReadsDocumentCoordinates(t *testing.T) {
+	m := FuncMask(func(x, y int) float32 { return float32((x*3+y*5)%7) / 6 })
+	full := raster.MustNewBuffer(30, 20)
+	for i := range full.Pix {
+		full.Pix[i] = 0.5
+	}
+	want := full.Clone()
+	Apply(want, m)
+
+	const ox, oy, w, h = 9, 4, 11, 8
+	part := raster.MustNewBuffer(w, h)
+	for i := range part.Pix {
+		part.Pix[i] = 0.5
+	}
+	ApplyAt(part, m, image.Pt(ox, oy))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			wr, _, _, wa := want.At(x+ox, y+oy)
+			gr, _, _, ga := part.At(x, y)
+			if wr != gr || wa != ga {
+				t.Fatalf("(%d,%d): got %v %v, want %v %v", x, y, gr, ga, wr, wa)
+			}
+		}
+	}
 }

@@ -5,12 +5,14 @@
 // isolated blending. Everything below this package is usable on its own for
 // callers who only need, say, the blend math.
 //
-// Layer content buffers are document-sized. A caller with a smaller image places
-// it into a document-sized buffer first with Place, so the model needs no
-// per-layer offset and effects can reach anywhere on the canvas.
+// A layer's content may be smaller than the document. Origin says where its
+// top-left sits, and a zero Origin with document-sized content is the simplest
+// case. Content that extends past the document is clipped to it
 package canvas
 
 import (
+	"image"
+
 	"github.com/odevine/impasto/blend"
 	"github.com/odevine/impasto/effects"
 	"github.com/odevine/impasto/mask"
@@ -24,11 +26,13 @@ type Node interface {
 }
 
 // Layer is a single composited element. Content is premultiplied linear and
-// document-sized. Opacity in (0,1] scales the layer and its effects together, a
+// sits at Origin in the document, it may be smaller than the document. Masks and
+// clip-to-below act in document coordinates. Opacity in (0,1] scales the layer and its effects together, a
 // non-positive Opacity is treated as fully opaque. Effects are applied in a fixed
 // order regardless of slice order
 type Layer struct {
 	Content     *raster.Buffer
+	Origin      image.Point
 	Opacity     float32
 	Mode        blend.Mode
 	Mask        mask.Mask
@@ -97,7 +101,7 @@ func renderGroup(g *Group, backdrop *raster.Buffer) {
 // renderChildren composites a sequence of nodes onto backdrop, tracking the clip
 // base so clip-to-below layers attach to the layer beneath them
 func renderChildren(nodes []Node, backdrop *raster.Buffer) {
-	var clipBase []float32
+	var clipBase *coverage
 	for i, n := range nodes {
 		switch node := n.(type) {
 		case *Layer:
@@ -119,76 +123,147 @@ func nextClips(nodes []Node, i int) bool {
 	return ok && next.ClipToBelow
 }
 
+// coverage is an alpha field over a rectangle of the document, zero everywhere
+// outside it. It is what a clip-to-below layer attaches to
+type coverage struct {
+	rect  image.Rectangle
+	alpha []float32
+}
+
 // renderLayer composites one layer with its effects onto backdrop, and returns
-// the alpha field a following clip-to-below layer should clip against. The field
-// is only built when needBase is set
-func renderLayer(l *Layer, backdrop *raster.Buffer, clipBase []float32, needBase bool) []float32 {
+// the coverage a following clip-to-below layer should clip against. It is only
+// built when needBase is set
+func renderLayer(l *Layer, backdrop *raster.Buffer, base *coverage, needBase bool) *coverage {
 	if l.Content == nil {
-		return clipBase
+		return base
 	}
-	clipped := l.ClipToBelow && clipBase != nil
-	// Only masks and clipping write to the content, so the caller's buffer is copied just for those
-	content := l.Content
-	if l.Mask != nil || clipped {
-		content = content.Clone()
-	}
-	if l.Mask != nil {
-		mask.Apply(content, l.Mask)
+	doc := image.Rect(0, 0, backdrop.Width, backdrop.Height)
+	content, origin := l.Content, l.Origin
+	own := false
+	if rect := bufferRect(content, origin); !rect.In(doc) {
+		// Only the part inside the document takes part, as if it were placed there
+		rect = rect.Intersect(doc)
+		if rect.Empty() {
+			return layerBase(nil, origin, base, l.ClipToBelow && base != nil, needBase)
+		}
+		content, origin, own = window(content, origin, rect), rect.Min, true
 	}
 
-	nextBase := clipBase
-	if clipped {
-		multiplyAlpha(content, clipBase)
-	} else {
-		// This layer becomes the base that subsequent clip layers attach to
-		nextBase = nil
-		if needBase {
-			nextBase = extractAlpha(content)
-		}
+	clipped := l.ClipToBelow && base != nil
+	// Only masks and clipping write to the content, so the caller's buffer is copied just for those
+	if (l.Mask != nil || clipped) && !own {
+		content, own = content.Clone(), true
 	}
+	if l.Mask != nil {
+		mask.ApplyAt(content, l.Mask, origin)
+	}
+	if clipped {
+		multiplyCoverage(content, origin, base)
+	}
+	next := layerBase(content, origin, base, clipped, needBase)
 
 	op := opacityOr(l.Opacity)
 	sorted := effects.Sort(l.Effects)
+	if len(sorted) == 0 {
+		blend.CompositeRect(backdrop, content, origin, l.Mode, op)
+		return next
+	}
+
+	// Effects run on a buffer that covers the content plus whatever they can
+	// reach. One that is not Bounded may write anywhere, so it gets the document
+	bleed, bounded := effects.MaxBleed(sorted)
+	scratchRect := bufferRect(content, origin)
+	if bounded {
+		scratchRect = scratchRect.Inset(-bleed).Intersect(doc)
+	} else {
+		scratchRect = doc
+	}
+	scratch := content
+	if scratchRect != bufferRect(content, origin) {
+		scratch = window(content, origin, scratchRect)
+	}
 	var all []effects.Rendered
 	for _, e := range sorted {
-		all = append(all, e.Render(content)...)
+		all = append(all, e.Render(scratch)...)
 	}
 
 	// Behind effects, then the layer, then front effects
+	at := scratchRect.Min
 	for _, r := range all {
 		if r.Behind {
-			blend.Composite(backdrop, r.Pixels, r.Mode, r.Opacity*op)
+			blend.CompositeRect(backdrop, r.Pixels, at, r.Mode, r.Opacity*op)
 		}
 	}
-	blend.Composite(backdrop, content, l.Mode, op)
+	blend.CompositeRect(backdrop, scratch, at, l.Mode, op)
 	for _, r := range all {
 		if !r.Behind {
-			blend.Composite(backdrop, r.Pixels, r.Mode, r.Opacity*op)
+			blend.CompositeRect(backdrop, r.Pixels, at, r.Mode, r.Opacity*op)
 		}
 	}
-	return nextBase
+	return next
 }
 
-// multiplyAlpha scales a premultiplied buffer by a coverage field, the clip-to
-// -below operation
-func multiplyAlpha(b *raster.Buffer, cov []float32) {
-	for i := 0; i < len(cov); i++ {
-		c := cov[i]
-		j := i * 4
-		b.Pix[j] *= c
-		b.Pix[j+1] *= c
-		b.Pix[j+2] *= c
-		b.Pix[j+3] *= c
+// layerBase returns the coverage a clip-to-below layer after this one attaches
+// to. A clipped layer keeps the base it was clipped to. Any other layer becomes
+// the base itself, and a layer with no visible content is an empty one
+func layerBase(content *raster.Buffer, origin image.Point, base *coverage, clipped, needBase bool) *coverage {
+	if clipped {
+		return base
+	}
+	if !needBase {
+		return nil
+	}
+	if content == nil {
+		return &coverage{}
+	}
+	return extractCoverage(content, origin)
+}
+
+// bufferRect is the document rectangle a buffer covers when placed at origin
+func bufferRect(b *raster.Buffer, origin image.Point) image.Rectangle {
+	return image.Rect(origin.X, origin.Y, origin.X+b.Width, origin.Y+b.Height)
+}
+
+// window returns a new buffer covering rect, holding the pixels of src (placed
+// at origin) that fall inside it and transparent elsewhere
+func window(src *raster.Buffer, origin image.Point, rect image.Rectangle) *raster.Buffer {
+	dst := raster.MustNewBuffer(rect.Dx(), rect.Dy())
+	r := rect.Intersect(bufferRect(src, origin))
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		si := ((y-origin.Y)*src.Width + r.Min.X - origin.X) * 4
+		di := ((y-rect.Min.Y)*dst.Width + r.Min.X - rect.Min.X) * 4
+		copy(dst.Pix[di:di+r.Dx()*4], src.Pix[si:si+r.Dx()*4])
+	}
+	return dst
+}
+
+// multiplyCoverage scales a premultiplied buffer placed at origin by a coverage
+// field, the clip-to-below operation. Pixels outside the field become zero
+func multiplyCoverage(b *raster.Buffer, origin image.Point, cov *coverage) {
+	cw := cov.rect.Dx()
+	for y := 0; y < b.Height; y++ {
+		for x := 0; x < b.Width; x++ {
+			p := image.Pt(origin.X+x, origin.Y+y)
+			var c float32
+			if p.In(cov.rect) {
+				c = cov.alpha[(p.Y-cov.rect.Min.Y)*cw+p.X-cov.rect.Min.X]
+			}
+			j := (y*b.Width + x) * 4
+			b.Pix[j] *= c
+			b.Pix[j+1] *= c
+			b.Pix[j+2] *= c
+			b.Pix[j+3] *= c
+		}
 	}
 }
 
-// extractAlpha copies a buffer's alpha channel
-func extractAlpha(b *raster.Buffer) []float32 {
+// extractCoverage copies a buffer's alpha channel along with where it sits
+func extractCoverage(b *raster.Buffer, origin image.Point) *coverage {
 	out := make([]float32, b.Width*b.Height)
 	for i := range out {
 		out[i] = b.Pix[i*4+3]
 	}
-	return out
+	return &coverage{rect: bufferRect(b, origin), alpha: out}
 }
 
 // opacityOr defaults a non-positive opacity to fully opaque and clamps above one

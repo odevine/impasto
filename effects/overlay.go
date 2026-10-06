@@ -52,3 +52,6 @@ func (o *GradientOverlay) Render(layer *raster.Buffer) []Rendered {
 		Opacity: opacityOr(o.Opacity),
 	}}
 }
+
+// Bleed is zero because the overlay is clipped to the layer's own alpha
+func (o *ColorOverlay) Bleed() int { return 0 }

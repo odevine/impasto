@@ -29,6 +29,15 @@ mask.Apply(dst *raster.Buffer, m Mask)
 In place, parallel, and safe to call with a nil mask (it returns immediately).
 The buffer's top-left is the mask's origin.
 
+```go
+mask.ApplyAt(dst *raster.Buffer, m Mask, origin image.Point)
+```
+
+`ApplyAt` is `Apply` for a buffer that sits at `origin` in the mask's
+coordinates, so the pixel at `(x, y)` is scaled by `Coverage(x+origin.X,
+y+origin.Y)`. `canvas` uses it so a layer with an `Origin` is masked in document
+coordinates.
+
 The implementation is one line of arithmetic, and it shows what the
 [premultiplied representation](raster.md#the-color-model) buys:
 
@@ -120,8 +129,9 @@ the layer stack into this package, so instead `canvas.Layer` carries a
 
 ## Gotchas
 
-- **Masks are document-sized in practice.** `Apply` maps the buffer's origin to
+- **Masks are read in document coordinates.** `Apply` maps the buffer's origin to
   the mask's, so a mask smaller than the buffer hides everything past its edge.
+  Use `ApplyAt` for a buffer that does not start at the document's origin.
 - **Coverage is not color.** No gamma conversion happens, in either direction.
 - **`NewRasterMask` panics** if `len(cov) != w*h`.
 - **`FuncMask` runs per pixel per apply.** Cache expensive coverage in a

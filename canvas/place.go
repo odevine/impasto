@@ -3,8 +3,9 @@ package canvas
 import "github.com/odevine/impasto/raster"
 
 // Place copies src into a new document-sized buffer with its top-left at (x,y).
-// This is how a caller turns a smaller image into layer content, since layers are
-// document-sized. Regions outside the document are clipped
+// It is for callers who want a document-sized buffer, a layer whose content is
+// smaller than the document can set Layer.Origin instead. Regions outside the
+// document are clipped
 func Place(docW, docH int, src *raster.Buffer, x, y int) *raster.Buffer {
 	dst := raster.MustNewBuffer(docW, docH)
 	PlaceInto(dst, src, x, y)
