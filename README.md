@@ -96,7 +96,7 @@ out := canvas.MustRender(doc)
 png.Encode(w, out.ToImage(8))
 ```
 
-A layer's content can be smaller than the document. Set `Layer.Origin` to where its top-left sits.
+A layer's content can be smaller than the document. Set `Layer.Origin` to where its top-left sits. A layer can also build its content when it is composited by setting `Layer.Load`, so a document of many large layers does not hold them all at once.
 
 ## Documentation
 

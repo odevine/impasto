@@ -18,26 +18,47 @@ const (
 	textW, textH = 2600, 260
 )
 
+// sceneKind selects how cardScene supplies its layer content
+type sceneKind int
+
+const (
+	// scenePlaced puts every text and icon layer in a document-sized buffer, the
+	// only way to build the scene without Origin
+	scenePlaced sceneKind = iota
+	// sceneBounded gives them their own size and an Origin
+	sceneBounded
+	// sceneLazy also builds every layer's buffer in Load, as a decoder would
+	sceneLazy
+)
+
 // cardScene builds a document shaped like a card render: eight document-sized
 // layers, ten text-sized layers one of which has a hard offset shadow, and a
-// small icon. With placed set every text and icon layer is first placed into a
-// document-sized buffer, which is the only way to build it without Origin
-func cardScene(placed bool) *Document {
+// small icon
+func cardScene(kind sceneKind) *Document {
+	// sized is a layer of w by h filled with a color at x,y, built up front or on
+	// demand according to the kind
+	sized := func(w, h, x, y int, r, g, b, a float32) *Layer {
+		switch kind {
+		case sceneLazy:
+			return &Layer{Load: func() (*raster.Buffer, image.Point, error) {
+				return fill(w, h, r, g, b, a), image.Pt(x, y), nil
+			}}
+		case sceneBounded:
+			return &Layer{Content: fill(w, h, r, g, b, a), Origin: image.Pt(x, y)}
+		default:
+			return &Layer{Content: Place(cardW, cardH, fill(w, h, r, g, b, a), x, y)}
+		}
+	}
 	var layers []Node
 	for i := 0; i < 8; i++ {
-		layers = append(layers, &Layer{
-			Content: fill(cardW, cardH, 0.1+0.05*float32(i), 0.2, 0.3, 0.3),
-			Opacity: 0.9,
-			Mode:    blend.Normal,
-		})
+		l := sized(cardW, cardH, 0, 0, 0.1+0.05*float32(i), 0.2, 0.3, 0.3)
+		l.Opacity, l.Mode = 0.9, blend.Normal
+		layers = append(layers, l)
 	}
 	small := func(w, h int, x, y int, shadow bool) *Layer {
-		l := &Layer{Content: fill(w, h, 0.9, 0.9, 0.9, 0.8), Origin: image.Pt(x, y)}
+		l := sized(w, h, x, y, 0.9, 0.9, 0.9, 0.8)
 		if shadow {
 			l.Effects = []effects.Effect{&effects.DropShadow{Color: color.Black, Opacity: 0.7, Angle: 0.8, Distance: 6}}
-		}
-		if placed {
-			l.Content, l.Origin = Place(cardW, cardH, l.Content, x, y), image.Point{}
 		}
 		return l
 	}
@@ -92,8 +113,12 @@ func benchPeakHeap(b *testing.B, d *Document) {
 }
 
 // BenchmarkMemoryCardPlaced is the card scene with document-sized text layers
-func BenchmarkMemoryCardPlaced(b *testing.B) { benchPeakHeap(b, cardScene(true)) }
+func BenchmarkMemoryCardPlaced(b *testing.B) { benchPeakHeap(b, cardScene(scenePlaced)) }
 
 // BenchmarkMemoryCardBounded is the card scene with the text and icon layers at
 // their own size
-func BenchmarkMemoryCardBounded(b *testing.B) { benchPeakHeap(b, cardScene(false)) }
+func BenchmarkMemoryCardBounded(b *testing.B) { benchPeakHeap(b, cardScene(sceneBounded)) }
+
+// BenchmarkMemoryCardLazy is the bounded scene with every layer built by Load, so
+// only the layer being composited is alive
+func BenchmarkMemoryCardLazy(b *testing.B) { benchPeakHeap(b, cardScene(sceneLazy)) }

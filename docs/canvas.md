@@ -41,21 +41,23 @@ else. Layers composite bottom to top in slice order, exactly as they read.
 ## Rendering
 
 ```go
-out, err := canvas.Render(doc)   // error only on invalid dimensions
+out, err := canvas.Render(doc)   // error on invalid dimensions or a failed Load
 out := canvas.MustRender(doc)    // panics instead
 img := out.ToImage(8)
 ```
 
-`Render` fails for exactly one reason, invalid document dimensions:
+`Render` fails for two reasons. The first is invalid document dimensions:
 
 ```go
 _, err := canvas.Render(&canvas.Document{Width: 0, Height: 10})
 // raster: invalid buffer dimensions: 0x10 must be positive
 ```
 
-Everything else about a document is renderable by construction. A nil layer
-`Content` is skipped, an out-of-range blend mode falls back to Normal, an empty
-group contributes nothing.
+The second is a [lazy layer](#lazy-layers) whose `Load` returns an error, which
+stops the render and is returned wrapped with the layer's position in the stack.
+Everything else about a document is renderable by construction. A layer with no
+`Content` and no `Load` is skipped, an out-of-range blend mode falls back to
+Normal, an empty group contributes nothing.
 
 ## Layer content and origin
 
@@ -112,6 +114,47 @@ Document-sized layers cost memory. Fifty of them on a 4000x4000 document is fift
 256 MB buffers. A layer with a small `Content` and an `Origin` costs only its own
 size, and for the rest, composite in stages and feed the flattened result back in
 as a single layer.
+
+## Lazy layers
+
+A layer can supply its content at the moment it is composited instead of holding
+it for the whole render.
+
+```go
+&canvas.Layer{
+    Load: func() (*raster.Buffer, image.Point, error) {
+        img, err := raster.FromFile("frame.png")   // decode here, not up front
+        return img, image.Pt(340, 120), err        // the buffer and its origin
+    },
+}
+```
+
+`Load` is used when `Content` is nil. Canvas calls it just before compositing the
+layer and drops its reference when the layer is done, so one loaded buffer is
+alive at a time however many lazy layers the document has. The point it returns
+is the layer's origin, and `Layer.Origin` is not used.
+
+The buffer belongs to canvas once `Load` returns it. Masks and clip-to-below
+write to it in place with no copy, so `Load` must return a buffer that nothing
+else uses. A buffer you keep, such as a decoded image reused across renders,
+should go in `Content` instead, where canvas copies it only if it must write to
+it. A `Load` that returns a nil buffer contributes nothing, as a nil `Content`
+does.
+
+```go
+out, err := canvas.Render(doc)
+// canvas: group 1: layer 3: load: open frame.png: no such file or directory
+```
+
+The first `Load` error stops the render, and `Render` returns no buffer. The
+error wraps the original, so `errors.Is` and `errors.As` see through it. The text
+names the position as `layer N` inside `group M` for each level of nesting.
+`MustRender` panics on it.
+
+Lazy layers lower the peak because layers are composited in order. A pass-through
+group composites each one onto the output straight away, so the peak is the
+output plus the layer in flight. An isolated group still holds its own
+document-sized buffer for its children.
 
 ## Opacity
 
@@ -193,9 +236,11 @@ is a compositing-order rule: its coverage depends on the layer stack, which a
 
 Worth knowing in order, because it explains most ordering questions:
 
-1. **Crop** the content to the document, if it extends past it.
-2. **Copy** the content, only if it is about to be masked or clipped, so the
-   caller's buffer is never mutated.
+1. **Load** the content, for a lazy layer, then **crop** it to the document if it
+   extends past it.
+2. **Copy** the content, only if it is about to be masked or clipped and it came
+   from `Content`, so the caller's buffer is never mutated. A buffer from `Load`
+   is already canvas's.
 3. **Apply the mask**, if any, in document coordinates.
 4. **Clip to below**, if set, or become the clip base for the layers above.
 5. **Sort the effects** into [canonical order](effects.md#stacking-order).
@@ -266,6 +311,9 @@ other content.
 ## Gotchas
 
 - **`Origin` is where the content's top-left sits.** A buffer that was already `Place`d at a position and also given that `Origin` is offset twice.
+- **A buffer returned by `Load` is written to in place.** Do not return one that
+  another layer, another render or the caller still uses.
+- **A lazy layer's position comes from `Load`**, not from `Layer.Origin`.
 - **Opacity 0 means opaque**, not hidden. Omit the layer instead.
 - **A blend mode inside an isolated group cannot see the backdrop.** See
   [groups](#groups).

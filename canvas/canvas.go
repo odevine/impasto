@@ -7,10 +7,17 @@
 //
 // A layer's content may be smaller than the document. Origin says where its
 // top-left sits, and a zero Origin with document-sized content is the simplest
-// case. Content that extends past the document is clipped to it
+// case. Content that extends past the document is clipped to it.
+//
+// A layer can also supply its content at the moment it is composited, with Load.
+// Only one loaded buffer is alive at a time, so a document of many large layers
+// no longer holds all of them for the whole render. Render returns the first
+// error a Load reports
 package canvas
 
 import (
+	"errors"
+	"fmt"
 	"image"
 
 	"github.com/odevine/impasto/blend"
@@ -27,12 +34,21 @@ type Node interface {
 
 // Layer is a single composited element. Content is premultiplied linear and
 // sits at Origin in the document, it may be smaller than the document. Masks and
-// clip-to-below act in document coordinates. Opacity in (0,1] scales the layer and its effects together, a
-// non-positive Opacity is treated as fully opaque. Effects are applied in a fixed
-// order regardless of slice order
+// clip-to-below act in document coordinates. Opacity in (0,1] scales the layer
+// and its effects together, a non-positive Opacity is treated as fully opaque.
+// Effects are applied in a fixed order regardless of slice order.
+//
+// Load supplies the content, and where it sits, when Content is nil. Canvas calls
+// it just before compositing the layer and drops the buffer once the layer is
+// done. The buffer belongs to canvas from then on, so Load must return one that
+// nothing else uses, and masks and clipping write to it in place. Origin is not
+// used for a layer with a Load. A Load that returns a nil buffer contributes
+// nothing, and one that returns an error stops the render. Content, when set,
+// is used instead and Load is not called
 type Layer struct {
 	Content     *raster.Buffer
 	Origin      image.Point
+	Load        func() (*raster.Buffer, image.Point, error)
 	Opacity     float32
 	Mode        blend.Mode
 	Mask        mask.Mask
@@ -64,17 +80,22 @@ type Document struct {
 }
 
 // Render flattens the document to a single premultiplied linear buffer. It
-// returns an error only if the document dimensions are invalid
+// returns an error if the document dimensions are invalid, or the first error
+// returned by a layer's Load, wrapped with the layer's position in the stack. A
+// failed render returns no buffer
 func Render(doc *Document) (*raster.Buffer, error) {
 	out, err := raster.NewBuffer(doc.Width, doc.Height)
 	if err != nil {
 		return nil, err
 	}
-	renderGroup(&doc.Root, out)
+	if err := renderGroup(&doc.Root, out); err != nil {
+		return nil, fmt.Errorf("canvas: %w", err)
+	}
 	return out, nil
 }
 
-// MustRender is Render for trusted sizes, panicking on an invalid dimension
+// MustRender is Render for trusted documents, panicking on an invalid dimension
+// or a Load error
 func MustRender(doc *Document) *raster.Buffer {
 	out, err := Render(doc)
 	if err != nil {
@@ -84,34 +105,44 @@ func MustRender(doc *Document) *raster.Buffer {
 }
 
 // renderGroup composites a group's children onto backdrop
-func renderGroup(g *Group, backdrop *raster.Buffer) {
+func renderGroup(g *Group, backdrop *raster.Buffer) error {
 	isolated := !g.PassThrough || g.Opacity > 0 && g.Opacity < 1 || g.Mask != nil || g.Mode != blend.Normal
 	if !isolated {
-		renderChildren(g.Layers, backdrop)
-		return
+		return renderChildren(g.Layers, backdrop)
 	}
 	inner := raster.MustNewBuffer(backdrop.Width, backdrop.Height)
-	renderChildren(g.Layers, inner)
+	if err := renderChildren(g.Layers, inner); err != nil {
+		return err
+	}
 	if g.Mask != nil {
 		mask.Apply(inner, g.Mask)
 	}
 	blend.Composite(backdrop, inner, g.Mode, opacityOr(g.Opacity))
+	return nil
 }
 
 // renderChildren composites a sequence of nodes onto backdrop, tracking the clip
-// base so clip-to-below layers attach to the layer beneath them
-func renderChildren(nodes []Node, backdrop *raster.Buffer) {
+// base so clip-to-below layers attach to the layer beneath them. It stops at the
+// first error and reports where in the stack it happened
+func renderChildren(nodes []Node, backdrop *raster.Buffer) error {
 	var clipBase *coverage
 	for i, n := range nodes {
 		switch node := n.(type) {
 		case *Layer:
-			clipBase = renderLayer(node, backdrop, clipBase, nextClips(nodes, i))
+			var err error
+			clipBase, err = renderLayer(node, backdrop, clipBase, nextClips(nodes, i))
+			if err != nil {
+				return fmt.Errorf("layer %d: %w", i, err)
+			}
 		case *Group:
-			renderGroup(node, backdrop)
+			if err := renderGroup(node, backdrop); err != nil {
+				return fmt.Errorf("group %d: %w", i, err)
+			}
 			// A nested group does not serve as a clip base
 			clipBase = nil
 		}
 	}
+	return nil
 }
 
 // nextClips reports whether the node after index i is a clip-to-below layer
@@ -133,18 +164,29 @@ type coverage struct {
 // renderLayer composites one layer with its effects onto backdrop, and returns
 // the coverage a following clip-to-below layer should clip against. It is only
 // built when needBase is set
-func renderLayer(l *Layer, backdrop *raster.Buffer, base *coverage, needBase bool) *coverage {
-	if l.Content == nil {
-		return base
+func renderLayer(l *Layer, backdrop *raster.Buffer, base *coverage, needBase bool) (*coverage, error) {
+	content, origin := l.Content, l.Origin
+	// A buffer from Load belongs to canvas, so it can be written to in place
+	own := false
+	if content == nil && l.Load != nil {
+		var err error
+		if content, origin, err = l.Load(); err != nil {
+			return nil, fmt.Errorf("load: %w", err)
+		}
+		if content != nil && !wellFormed(content) {
+			return nil, errors.New("load: returned a buffer whose pixels do not match its size")
+		}
+		own = true
+	}
+	if content == nil {
+		return base, nil
 	}
 	doc := image.Rect(0, 0, backdrop.Width, backdrop.Height)
-	content, origin := l.Content, l.Origin
-	own := false
 	if rect := bufferRect(content, origin); !rect.In(doc) {
 		// Only the part inside the document takes part, as if it were placed there
 		rect = rect.Intersect(doc)
 		if rect.Empty() {
-			return layerBase(nil, origin, base, l.ClipToBelow && base != nil, needBase)
+			return layerBase(nil, origin, base, l.ClipToBelow && base != nil, needBase), nil
 		}
 		content, origin, own = window(content, origin, rect), rect.Min, true
 	}
@@ -166,7 +208,7 @@ func renderLayer(l *Layer, backdrop *raster.Buffer, base *coverage, needBase boo
 	sorted := effects.Sort(l.Effects)
 	if len(sorted) == 0 {
 		blend.CompositeRect(backdrop, content, origin, l.Mode, op)
-		return next
+		return next, nil
 	}
 
 	// Effects run on a buffer that covers the content plus whatever they can
@@ -200,7 +242,13 @@ func renderLayer(l *Layer, backdrop *raster.Buffer, base *coverage, needBase boo
 			blend.CompositeRect(backdrop, r.Pixels, at, r.Mode, r.Opacity*op)
 		}
 	}
-	return next
+	return next, nil
+}
+
+// wellFormed reports whether a buffer has positive dimensions and the pixel
+// count they imply, which a buffer from raster always does
+func wellFormed(b *raster.Buffer) bool {
+	return b.Width > 0 && b.Height > 0 && len(b.Pix) == b.Width*b.Height*4
 }
 
 // layerBase returns the coverage a clip-to-below layer after this one attaches
