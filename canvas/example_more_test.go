@@ -1,6 +1,7 @@
 package canvas_test
 
 import (
+	"errors"
 	"fmt"
 	"image"
 
@@ -54,6 +55,54 @@ func ExampleLayer_origin() {
 	// Output:
 	// badge at (10,10): 1, one pixel before it: 0, last pixel: 1
 	// badge hanging off the corner: 1 at (1,1), 0 at (2,2)
+}
+
+// A layer can build its content when it is composited, so a document of many
+// large layers does not hold them all at once. Load returns the buffer and where
+// it sits, and canvas drops it when the layer is done
+func ExampleLayer_load() {
+	loaded := 0
+	frame := &canvas.Layer{Load: func() (*raster.Buffer, image.Point, error) {
+		loaded++
+		b := raster.MustNewBuffer(4, 4)
+		for i := 0; i < len(b.Pix); i += 4 {
+			b.Pix[i], b.Pix[i+1], b.Pix[i+2], b.Pix[i+3] = 0, 0, 1, 1
+		}
+		return b, image.Pt(6, 6), nil
+	}}
+	doc := &canvas.Document{Width: 16, Height: 16, Root: canvas.Group{
+		PassThrough: true,
+		Layers:      []canvas.Node{frame},
+	}}
+
+	out := canvas.MustRender(doc)
+	_, _, _, inside := out.At(7, 7)
+	_, _, _, outside := out.At(2, 2)
+	fmt.Printf("drawn at (7,7): %.0f, at (2,2): %.0f, Load calls: %d\n", inside, outside, loaded)
+	// Output:
+	// drawn at (7,7): 1, at (2,2): 0, Load calls: 1
+}
+
+// The first Load error stops the render. The error wraps the original and names
+// the layer's position in the stack
+func ExampleRender_loadError() {
+	errMissing := errors.New("frame.png: no such file")
+	doc := &canvas.Document{Width: 16, Height: 16, Root: canvas.Group{
+		PassThrough: true,
+		Layers: []canvas.Node{
+			&canvas.Layer{Content: raster.MustNewBuffer(16, 16)},
+			&canvas.Layer{Load: func() (*raster.Buffer, image.Point, error) {
+				return nil, image.Point{}, errMissing
+			}},
+		},
+	}}
+
+	out, err := canvas.Render(doc)
+	fmt.Println(out == nil, errors.Is(err, errMissing))
+	fmt.Println(err)
+	// Output:
+	// true true
+	// canvas: layer 1: load: frame.png: no such file
 }
 
 // A pass-through group lets its children blend with whatever is beneath the

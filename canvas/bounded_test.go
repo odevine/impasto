@@ -50,16 +50,18 @@ const shadowNoise = 1e-6
 // tolerance is set, about fifty times what is seen on amd64
 const maxDifferingShare = 1e-3
 
-// renderPair renders the same scene twice, once with every layer placed into a
-// document-sized buffer and once with the content bounded at an origin, and
-// requires the two results to match exactly
+// renderPair renders the same scene with every layer placed into a
+// document-sized buffer, with the content bounded at an origin, and with the
+// content bounded but supplied lazily by Load. It requires the placed and bounded
+// results to match exactly, and the lazy one to match the bounded one exactly
 func renderPair(t *testing.T, docW, docH int, build func(content func(b *raster.Buffer, x, y int) *Layer) []Node) {
 	t.Helper()
 	renderPairTol(t, 0, docW, docH, build)
 }
 
-// renderPairTol is renderPair allowing each float to differ by up to tol, and
-// also requiring the 8-bit renders to agree closely when tol is set
+// renderPairTol is renderPair allowing each float of the placed comparison to
+// differ by up to tol, and also requiring the 8-bit renders to agree closely when
+// tol is set
 func renderPairTol(t *testing.T, tol float32, docW, docH int, build func(content func(b *raster.Buffer, x, y int) *Layer) []Node) {
 	t.Helper()
 	placed := func(b *raster.Buffer, x, y int) *Layer {
@@ -68,12 +70,17 @@ func renderPairTol(t *testing.T, tol float32, docW, docH int, build func(content
 	bounded := func(b *raster.Buffer, x, y int) *Layer {
 		return &Layer{Content: b, Origin: image.Pt(x, y)}
 	}
+	lazy := func(b *raster.Buffer, x, y int) *Layer {
+		// Load hands over a buffer canvas may write to, so each call returns a copy
+		return &Layer{Load: func() (*raster.Buffer, image.Point, error) { return b.Clone(), image.Pt(x, y), nil }}
+	}
 	render := func(content func(b *raster.Buffer, x, y int) *Layer) *raster.Buffer {
 		layers := append([]Node{&Layer{Content: fill(docW, docH, 0.1, 0.2, 0.3, 1)}}, build(content)...)
 		return MustRender(&Document{Width: docW, Height: docH, Root: Group{PassThrough: true, Layers: layers}})
 	}
 	want, got := render(placed), render(bounded)
 	requireSame(t, tol, want, got)
+	requireSame(t, 0, got, render(lazy))
 	if tol > 0 {
 		requireClose8(t, want.ToImage(8).(*image.NRGBA).Pix, got.ToImage(8).(*image.NRGBA).Pix)
 	}
