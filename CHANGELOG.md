@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/odevine/impasto/compare/v0.2.0...v0.2.1) (2026-10-06)
+
+
+### Performance Improvements
+
+* **raster:** encode to 8-bit through a table and ingest RGBA directly ([2ffd980](https://github.com/odevine/impasto/commit/2ffd980daab382f840965a2b50181444fb95edc1))
+
 ## [0.2.0](https://github.com/odevine/impasto/compare/v0.1.1...v0.2.0) (2026-10-06)
 
 
