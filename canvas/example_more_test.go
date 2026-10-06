@@ -2,6 +2,7 @@ package canvas_test
 
 import (
 	"fmt"
+	"image"
 
 	"github.com/odevine/impasto/blend"
 	"github.com/odevine/impasto/canvas"
@@ -9,9 +10,9 @@ import (
 	"github.com/odevine/impasto/raster"
 )
 
-// Layer content is document-sized, so a smaller image is placed into a
-// document-sized buffer first. This is what keeps the model free of per-layer
-// offsets and lets an effect reach anywhere on the canvas
+// Place copies a smaller image into a new document-sized buffer at a position,
+// for callers who want a buffer the size of the document. A layer does not need
+// one, see the Layer example for Origin
 func ExamplePlace() {
 	logo := raster.MustNewBuffer(4, 4)
 	for i := 0; i < len(logo.Pix); i += 4 {
@@ -27,6 +28,32 @@ func ExamplePlace() {
 	// Output:
 	// empty elsewhere 0.0, placed at (10,10) 1.0
 	// content is document-sized: 32x32
+}
+
+// A layer's content can be smaller than the document. Origin says where its
+// top-left pixel sits, and the part of the content that falls outside the
+// document is clipped
+func ExampleLayer_origin() {
+	badge := raster.MustNewBuffer(4, 4)
+	for i := 0; i < len(badge.Pix); i += 4 {
+		badge.Pix[i], badge.Pix[i+1], badge.Pix[i+2], badge.Pix[i+3] = 1, 0, 0, 1
+	}
+
+	doc := &canvas.Document{Width: 32, Height: 32, Root: canvas.Group{
+		PassThrough: true,
+		Layers: []canvas.Node{
+			&canvas.Layer{Content: badge, Origin: image.Pt(10, 10)},
+			&canvas.Layer{Content: badge, Origin: image.Pt(-2, -2)},
+		},
+	}}
+	out := canvas.MustRender(doc)
+
+	alpha := func(x, y int) float32 { _, _, _, a := out.At(x, y); return a }
+	fmt.Printf("badge at (10,10): %.0f, one pixel before it: %.0f, last pixel: %.0f\n", alpha(10, 10), alpha(9, 9), alpha(13, 13))
+	fmt.Printf("badge hanging off the corner: %.0f at (1,1), %.0f at (2,2)\n", alpha(1, 1), alpha(2, 2))
+	// Output:
+	// badge at (10,10): 1, one pixel before it: 0, last pixel: 1
+	// badge hanging off the corner: 1 at (1,1), 0 at (2,2)
 }
 
 // A pass-through group lets its children blend with whatever is beneath the

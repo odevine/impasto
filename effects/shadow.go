@@ -110,3 +110,11 @@ func opacityOr(o float32) float32 {
 	}
 	return o
 }
+
+// Bleed is the farthest the shadow can reach past the layer's edge, which is the
+// offset plus the blur, with room for bilinear sampling of the offset. Choke only
+// erodes the alpha, so it never extends the reach, but it is counted so the
+// bound stays safe if the erosion changes
+func (d *DropShadow) Bleed() int {
+	return int(math.Ceil(float64(d.Distance)+3*float64(d.BlurRadius)+float64(d.Choke))) + 2
+}

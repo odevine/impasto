@@ -233,11 +233,38 @@ dilating grows into transparent. This is the opposite of the clamping
 
 Radii round to whole pixels.
 
+## Bounded effects
+
+```go
+type Bounded interface {
+    Bleed() int // pixels past the content's edges the effect can write
+}
+
+effects.MaxBleed(list []Effect) (bleed int, ok bool)
+```
+
+An effect that implements `Bounded` states how far past the layer's content it
+can write. `canvas` pads a layer's content by the largest `Bleed` among its
+effects, clipped to the document, runs the effects on that smaller buffer, and
+composites the results at the padded position. If any effect on a layer does not
+implement `Bounded`, `canvas` runs all of them on a document-sized buffer, which
+is also what keeps an effect that depends on position in the document, such as a
+gradient overlay, meaning what it says.
+
+`DropShadow` and `ColorOverlay` implement it. A drop shadow's `Bleed` is
+`ceil(Distance + 3*BlurRadius + Choke) + 2`, which covers the offset, the three
+box passes of the blur, and the bilinear sampling of a fractional offset. A
+`Bleed` that is too small would clip a shadow without any error, so
+`TestDropShadowStaysWithinBleed` sweeps distance, blur, choke and angle and
+checks that no visible pixel falls outside it.
+
 ## Cost
 
-Every effect allocates at least one document-sized buffer, and bevel allocates
-several. A layer with eight effects on a 4000x4000 document is moving a lot of
-memory.
+Every effect allocates at least one buffer the size of the one it is given, and
+bevel allocates several. Effects that implement [`Bounded`](#bounded-effects) run
+on a buffer only slightly larger than the layer's content, and the rest run on a
+document-sized one. A layer with eight effects on a 4000x4000 document is moving a
+lot of memory in the second case.
 
 The blurs themselves are cheap: `blur.Gaussian` is
 [O(1) per pixel in the radius](blur.md#three-boxes-make-a-gaussian), so a large

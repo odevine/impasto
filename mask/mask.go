@@ -93,6 +93,14 @@ func (ms Multi) Coverage(x, y int) float32 {
 // premultiplied and correctly attenuates both color and alpha. The buffer's
 // top-left is treated as the mask's origin (0,0).
 func Apply(dst *raster.Buffer, m Mask) {
+	ApplyAt(dst, m, image.Point{})
+}
+
+// ApplyAt is Apply for a buffer that sits at origin in the mask's coordinates,
+// so the pixel at (x,y) is scaled by Coverage(x+origin.X, y+origin.Y). A buffer
+// cut from a larger document uses this to be masked as it would have been in
+// place
+func ApplyAt(dst *raster.Buffer, m Mask, origin image.Point) {
 	if m == nil {
 		return
 	}
@@ -101,7 +109,7 @@ func Apply(dst *raster.Buffer, m Mask) {
 		for y := lo; y < hi; y++ {
 			i := y * w * 4
 			for x := 0; x < w; x++ {
-				c := m.Coverage(x, y)
+				c := m.Coverage(x+origin.X, y+origin.Y)
 				dst.Pix[i] *= c
 				dst.Pix[i+1] *= c
 				dst.Pix[i+2] *= c

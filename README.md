@@ -96,7 +96,7 @@ out := canvas.MustRender(doc)
 png.Encode(w, out.ToImage(8))
 ```
 
-Layer content is document-sized. Place a smaller image with `canvas.Place`.
+A layer's content can be smaller than the document. Set `Layer.Origin` to where its top-left sits.
 
 ## Documentation
 

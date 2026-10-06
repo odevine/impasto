@@ -26,6 +26,7 @@ type Group struct {
 
 type Layer struct {
     Content     *raster.Buffer
+    Origin      image.Point
     Opacity     float32
     Mode        blend.Mode
     Mask        mask.Mask
@@ -56,18 +57,41 @@ Everything else about a document is renderable by construction. A nil layer
 `Content` is skipped, an out-of-range blend mode falls back to Normal, an empty
 group contributes nothing.
 
-## Layer content is document-sized
+## Layer content and origin
 
-This is the model's one real constraint, and worth getting familiar with early.
-Every layer's `Content` buffer is the full size of the document. There is no
-per-layer offset.
+A layer's `Content` can be any size. `Origin` is the document position of its
+top-left pixel, and it defaults to zero, so a document-sized buffer with no
+`Origin` is the simplest layer.
 
 ```go
 logo, _ := raster.FromFile("logo.png")     // whatever size it happens to be
-content := canvas.Place(2000, 1000, logo, 340, 120)  // now document-sized
+layer := &canvas.Layer{Content: logo, Origin: image.Pt(340, 120)}
 ```
 
+Content that extends past the document is clipped to it, and a layer entirely
+outside the document draws nothing. A layer only blends over the part of the
+document its content covers, so a small layer costs memory and time in
+proportion to its own size.
+
+Masks and clip-to-below act in document coordinates. A mask is asked for
+`Coverage(x+Origin.X, y+Origin.Y)` at the content pixel `(x, y)`, so the same
+mask gives the same result wherever the layer sits. A clipped layer is confined
+to the alpha of its base where the two overlap, and is empty everywhere else.
+
+Effects see only the layer's content, grown by the largest [`Bleed`](effects.md#bounded-effects)
+among them. When every effect on a layer is `Bounded` the effects run on that
+smaller buffer. When any is not, the layer is expanded to the whole document
+first, so such effects behave as they do for a document-sized layer.
+
+A bounded layer renders the same as the same pixels placed into a document-sized
+buffer. Layers with a blurred or offset drop shadow can differ in the last bit of
+a float because the shadow is computed on a differently sized buffer, and the
+8-bit output is identical.
+
 ### Placing content
+
+`Place` predates `Origin` and still works. It is useful when a buffer of the
+document's size is wanted, for example as the base for `PlaceInto`.
 
 ```go
 content := canvas.Place(docW, docH int, src *raster.Buffer, x, y int) *raster.Buffer
@@ -78,17 +102,15 @@ canvas.PlaceInto(dst, src *raster.Buffer, x, y int)
 already have. Both **overwrite** the destination region rather than compositing
 into it, and both clip anything falling outside the document.
 
-### Why it works this way
+### Memory
 
-Two reasons. Effects can reach anywhere on the canvas: a drop shadow with a large
-offset and blur needs room to exist, and a per-layer bounding box would have to
-grow to accommodate it, which means recomputing bounds every time a parameter
-changes. And compositing needs no coordinate translation at all, so every
-pixelwise operation is a straight indexed loop over two same-sized buffers.
+Isolated groups still use a document-sized buffer, and a layer with an effect
+that is not `Bounded` is expanded to the document for the render.
 
-The cost is memory. Fifty layers on a 4000x4000 document is fifty 256 MB
-buffers. For documents that large, composite in stages and feed the flattened
-result back in as a single layer.
+Document-sized layers cost memory. Fifty of them on a 4000x4000 document is fifty
+256 MB buffers. A layer with a small `Content` and an `Origin` costs only its own
+size, and for the rest, composite in stages and feed the flattened result back in
+as a single layer.
 
 ## Opacity
 
@@ -170,24 +192,28 @@ is a compositing-order rule: its coverage depends on the layer stack, which a
 
 Worth knowing in order, because it explains most ordering questions:
 
-1. **Clone** the content, so the caller's buffer is never mutated.
-2. **Apply the mask**, if any.
-3. **Clip to below**, if set, or become the clip base for the layers above.
-4. **Sort the effects** into [canonical order](effects.md#stacking-order).
-5. **Render each effect** against the masked content.
-6. **Composite behind-effects** (shadows, outer glow) onto the backdrop.
-7. **Composite the layer** with its own mode and opacity.
-8. **Composite front-effects** (everything else) on top.
+1. **Crop** the content to the document, if it extends past it.
+2. **Copy** the content, only if it is about to be masked or clipped, so the
+   caller's buffer is never mutated.
+3. **Apply the mask**, if any, in document coordinates.
+4. **Clip to below**, if set, or become the clip base for the layers above.
+5. **Sort the effects** into [canonical order](effects.md#stacking-order).
+6. **Render each effect** against the masked content, grown by the effects'
+   [bleed](effects.md#bounded-effects) or expanded to the document.
+7. **Composite behind-effects** (shadows, outer glow) onto the backdrop.
+8. **Composite the layer** with its own mode and opacity.
+9. **Composite front-effects** (everything else) on top.
 
 Two consequences fall out of this. Effects see the layer's content *after*
 masking, so a mask reshapes the shadow too. And effect opacity is multiplied by
-layer opacity in step 6 and 8, which is what keeps a layer and its effects fading
+layer opacity in step 7 and 9, which is what keeps a layer and its effects fading
 together.
 
 ## Immutability
 
-`Render` never mutates a caller's buffer. The clone in step 1 is what guarantees
-it. A layer can be re-composited with different settings, or shared between two
+`Render` never mutates a caller's buffer. Masking and clipping are the only steps
+that write to a layer's content, so the copy in step 2 is what guarantees it. A
+layer can be re-composited with different settings, or shared between two
 documents, without surprises:
 
 ```go
@@ -195,7 +221,8 @@ doc.Root.Layers[0].(*canvas.Layer).Opacity = 0.5
 out2 := canvas.MustRender(doc)  // content is still pristine
 ```
 
-The cost is one document-sized allocation per layer per render.
+A layer that is not masked or clipped is composited straight from the buffer you
+gave it, so rendering it allocates nothing for the content.
 
 ## Determinism
 
@@ -237,7 +264,7 @@ other content.
 
 ## Gotchas
 
-- **Content must be document-sized.** Use [`Place`](#placing-content).
+- **`Origin` is where the content's top-left sits.** A buffer that was already `Place`d at a position and also given that `Origin` is offset twice.
 - **Opacity 0 means opaque**, not hidden. Omit the layer instead.
 - **A blend mode inside an isolated group cannot see the backdrop.** See
   [groups](#groups).

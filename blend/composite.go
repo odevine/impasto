@@ -1,6 +1,8 @@
 package blend
 
 import (
+	"image"
+
 	"github.com/odevine/impasto/internal/parallel"
 	"github.com/odevine/impasto/raster"
 )
@@ -70,58 +72,74 @@ func Composite(dst, src *raster.Buffer, m Mode, opacity float32) {
 	if !dst.SameSize(src) {
 		panic("blend: Composite requires equal-size buffers")
 	}
+	CompositeRect(dst, src, image.Point{}, m, opacity)
+}
+
+// CompositeRect blends src over the part of dst that src covers when src's
+// top-left sits at origin, clipped to dst, and touches nothing else. The origin
+// may be negative or leave src partly or fully outside dst. Mode, opacity and
+// row banding follow Composite, so a zero origin with equal-size buffers gives
+// the same result
+func CompositeRect(dst, src *raster.Buffer, origin image.Point, m Mode, opacity float32) {
 	if opacity <= 0 {
 		return
 	}
 	if opacity > 1 {
 		opacity = 1
 	}
-	w := dst.Width
-	if m == Normal {
-		compositeNormal(dst, src, opacity)
+	r := image.Rect(origin.X, origin.Y, origin.X+src.Width, origin.Y+src.Height).
+		Intersect(image.Rect(0, 0, dst.Width, dst.Height))
+	if r.Empty() {
 		return
 	}
-	parallel.Rows(dst.Height, func(lo, hi int) {
-		for y := lo; y < hi; y++ {
-			i := y * w * 4
-			for x := 0; x < w; x++ {
+	if m == Normal {
+		compositeNormal(dst, src, origin, r, opacity)
+		return
+	}
+	parallel.Rows(r.Dy(), func(lo, hi int) {
+		for y := r.Min.Y + lo; y < r.Min.Y+hi; y++ {
+			di := (y*dst.Width + r.Min.X) * 4
+			si := ((y-origin.Y)*src.Width + r.Min.X - origin.X) * 4
+			for x := r.Min.X; x < r.Max.X; x++ {
 				cs := [4]float32{
-					src.Pix[i] * opacity,
-					src.Pix[i+1] * opacity,
-					src.Pix[i+2] * opacity,
-					src.Pix[i+3] * opacity,
+					src.Pix[si] * opacity,
+					src.Pix[si+1] * opacity,
+					src.Pix[si+2] * opacity,
+					src.Pix[si+3] * opacity,
 				}
-				cb := [4]float32{dst.Pix[i], dst.Pix[i+1], dst.Pix[i+2], dst.Pix[i+3]}
+				cb := [4]float32{dst.Pix[di], dst.Pix[di+1], dst.Pix[di+2], dst.Pix[di+3]}
 				out := BlendPixel(cb, cs, m)
-				dst.Pix[i] = out[0]
-				dst.Pix[i+1] = out[1]
-				dst.Pix[i+2] = out[2]
-				dst.Pix[i+3] = out[3]
-				i += 4
+				dst.Pix[di] = out[0]
+				dst.Pix[di+1] = out[1]
+				dst.Pix[di+2] = out[2]
+				dst.Pix[di+3] = out[3]
+				di += 4
+				si += 4
 			}
 		}
 	})
 }
 
-// compositeNormal is the source-over fast path. Normal blending needs no
-// un-premultiply, so it skips straight-color recovery entirely, which is the
-// common case since most layers use Normal
-func compositeNormal(dst, src *raster.Buffer, opacity float32) {
-	w := dst.Width
-	parallel.Rows(dst.Height, func(lo, hi int) {
-		for y := lo; y < hi; y++ {
-			i := y * w * 4
-			for x := 0; x < w; x++ {
-				sr := src.Pix[i] * opacity
-				sg := src.Pix[i+1] * opacity
-				sb := src.Pix[i+2] * opacity
-				sa := src.Pix[i+3] * opacity
+// compositeNormal is the source-over fast path over the rect r of dst. Normal
+// blending needs no un-premultiply, so it skips straight-color recovery
+// entirely, which is the common case since most layers use Normal
+func compositeNormal(dst, src *raster.Buffer, origin image.Point, r image.Rectangle, opacity float32) {
+	parallel.Rows(r.Dy(), func(lo, hi int) {
+		for y := r.Min.Y + lo; y < r.Min.Y+hi; y++ {
+			di := (y*dst.Width + r.Min.X) * 4
+			si := ((y-origin.Y)*src.Width + r.Min.X - origin.X) * 4
+			for x := r.Min.X; x < r.Max.X; x++ {
+				sr := src.Pix[si] * opacity
+				sg := src.Pix[si+1] * opacity
+				sb := src.Pix[si+2] * opacity
+				sa := src.Pix[si+3] * opacity
 				inv := 1 - sa
-				dst.Pix[i] = sr + dst.Pix[i]*inv
-				dst.Pix[i+1] = sg + dst.Pix[i+1]*inv
-				dst.Pix[i+2] = sb + dst.Pix[i+2]*inv
-				dst.Pix[i+3] = sa + dst.Pix[i+3]*inv
-				i += 4
+				dst.Pix[di] = sr + dst.Pix[di]*inv
+				dst.Pix[di+1] = sg + dst.Pix[di+1]*inv
+				dst.Pix[di+2] = sb + dst.Pix[di+2]*inv
+				dst.Pix[di+3] = sa + dst.Pix[di+3]*inv
+				di += 4
+				si += 4
 			}
 		}
 	})
