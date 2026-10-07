@@ -112,6 +112,26 @@ entirely outside it. Mode, opacity and banding work as in `Composite`, which is
 result for equal-size buffers. `canvas` uses it to blend a layer over only the
 region its content covers.
 
+### CompositeNRGBA
+
+```go
+blend.CompositeNRGBA(dst *raster.Buffer, src *image.NRGBA, origin image.Point, m Mode, opacity float32)
+```
+
+`CompositeNRGBA` blends an 8-bit straight-alpha sRGB image over `dst` as
+`CompositeRect` blends a buffer, without building the buffer. It reads each pixel
+through the same sRGB table `raster.FromImage` uses and then does the same
+arithmetic, so the result is bit-identical to converting `src` and calling
+`CompositeRect`, for every mode and opacity. In Normal mode a pixel with no alpha
+is skipped, and a fully opaque pixel at full opacity is written without a
+multiply, which is where most of the saving comes from for an image with large
+transparent or opaque regions. Other modes skip only the transparent pixels and
+blend the rest through `BlendPixel`.
+
+`src` is never written to, so one image can be composited by many goroutines at
+once. Its bounds need not start at the origin, and a sub-image is read where it
+sits in its parent.
+
 ## The modes
 
 Values are a fixed `iota` ordering that is part of the API. You can persist the
