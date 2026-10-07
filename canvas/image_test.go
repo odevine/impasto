@@ -247,3 +247,69 @@ func TestImageLayerIsIndependentOfParallelism(t *testing.T) {
 		equalBits(t, render(procs), one, "GOMAXPROCS")
 	}
 }
+
+// sparsePattern is an image with wide transparent stretches in its rows, so an
+// index has runs to skip
+func sparsePattern(w, h int) *image.NRGBA {
+	img := image.NewNRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			if y%5 == 0 || x < 4 || x >= w-4 || (x > w/2-3 && x < w/2+3) {
+				img.SetNRGBA(x, y, color.NRGBA{R: uint8(x * 9), G: uint8(y * 5), B: 77, A: uint8(40 + (x+y)%200)})
+			}
+		}
+	}
+	return img
+}
+
+func TestIndexedLayerRendersLikeItsBuffer(t *testing.T) {
+	const big = 200
+	img := sparsePattern(190, 150)
+	ix := blend.Index(img)
+	for m := blend.Normal; m <= blend.Luminosity; m++ {
+		for _, at := range []image.Point{{0, 0}, {5, 9}, {-30, -20}, {120, 100}} {
+			render := func(l *Layer) *raster.Buffer {
+				out, err := Render(&Document{Width: big, Height: big, Root: Group{PassThrough: true, Layers: []Node{
+					&Layer{Content: fill(big, big, 0.3, 0.6, 0.4, 0.8)}, l,
+				}}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return out
+			}
+			buf, _ := raster.FromImage(img)
+			want := render(&Layer{Content: buf, Origin: at, Mode: m, Opacity: 0.7})
+			equalBits(t, render(&Layer{Image: ix, Origin: at, Mode: m, Opacity: 0.7}), want, m.String())
+			lazy := render(&Layer{LoadImage: func() (image.Image, image.Point, error) { return ix, at, nil }, Mode: m, Opacity: 0.7})
+			equalBits(t, lazy, want, m.String()+" lazy")
+		}
+	}
+}
+
+// A layer that has to write to its content converts the image, and an index
+// does not change what it converts
+func TestIndexedLayerFallbacksRenderLikeTheirBuffer(t *testing.T) {
+	img := sparsePattern(60, 40)
+	ix := blend.Index(img)
+	for name, set := range map[string]func(*Layer){
+		"mask": func(l *Layer) { l.Mask = mask.FuncMask(func(x, y int) float32 { return float32((x+y)%4) / 3 }) },
+		"effects": func(l *Layer) {
+			l.Effects = []effects.Effect{&effects.DropShadow{Color: color.Black, Opacity: 0.6, Distance: 3}}
+		},
+		"clipped": func(l *Layer) { l.ClipToBelow = true },
+	} {
+		render := func(mk func() *Layer) *raster.Buffer {
+			l := mk()
+			set(l)
+			out, err := Render(&Document{Width: imgDocW, Height: imgDocH, Root: Group{PassThrough: true, Layers: []Node{below(), l}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return out
+		}
+		buf, _ := raster.FromImage(img)
+		want := render(func() *Layer { return &Layer{Content: buf, Origin: image.Pt(2, 3)} })
+		got := render(func() *Layer { return &Layer{Image: ix, Origin: image.Pt(2, 3)} })
+		equalBits(t, got, want, name)
+	}
+}

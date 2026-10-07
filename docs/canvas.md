@@ -185,6 +185,12 @@ almost nothing. The pixels are the same, bit for bit, as converting the image wi
 layer that has to write to its content, is converted first, and that is the only
 difference.
 
+An image wrapped by [`blend.Index`](blend.md#indexed-and-compositeindexed) is
+blended through the same path and skips the transparent stretches its index
+records, which is where a mostly transparent frame spends its time. Any
+other use of an indexed image, such as under a mask, converts it as a plain
+`*image.NRGBA`.
+
 Canvas never writes to an image, so one decoded image can serve any number of
 layers and any number of concurrent renders. That is the difference from a buffer
 returned by `Load`, which canvas owns and writes to. A nil or empty image

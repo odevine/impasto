@@ -50,10 +50,11 @@ type Node interface {
 // Load are both nil, with Image placed at Origin and LoadImage returning its own
 // origin as Load does. An *image.NRGBA with no mask, effects or clip-to-below is
 // blended straight into the document without a float buffer, which is cheaper in
-// time and memory and gives the same pixels. Any other image, or a layer that
-// needs its content written to, is converted first. Canvas never writes to an
-// image, so one decoded image can be shared by any number of layers and
-// concurrent renders. A nil or empty image contributes nothing
+// time and memory and gives the same pixels. A [blend.Indexed] image is blended
+// the same way and skips the transparent stretches its index records. Any other
+// image, or a layer that needs its content written to, is converted first. Canvas
+// never writes to an image, so one decoded image can be shared by any number of
+// layers and concurrent renders. A nil or empty image contributes nothing
 type Layer struct {
 	Content     *raster.Buffer
 	Origin      image.Point
@@ -201,7 +202,15 @@ func renderLayer(l *Layer, backdrop *raster.Buffer, base *coverage, needBase boo
 			// A layer that is only blended needs nothing from its image beyond
 			// reading it, so it skips the buffer that a mask, a clip or an
 			// effect would need to write to
-			if n, ok := img.(*image.NRGBA); ok && l.Mask == nil && len(l.Effects) == 0 && !needBase && !(l.ClipToBelow && base != nil) {
+			blendOnly := l.Mask == nil && len(l.Effects) == 0 && !needBase && !(l.ClipToBelow && base != nil)
+			if ix, ok := img.(*blend.Indexed); ok {
+				if blendOnly {
+					blend.CompositeIndexed(backdrop, ix, origin, l.Mode, opacityOr(l.Opacity))
+					return nil, nil
+				}
+				img = ix.NRGBA
+			}
+			if n, ok := img.(*image.NRGBA); ok && blendOnly {
 				blend.CompositeNRGBA(backdrop, n, origin, l.Mode, opacityOr(l.Opacity))
 				return nil, nil
 			}
