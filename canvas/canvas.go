@@ -44,11 +44,22 @@ type Node interface {
 // nothing else uses, and masks and clipping write to it in place. Origin is not
 // used for a layer with a Load. A Load that returns a nil buffer contributes
 // nothing, and one that returns an error stops the render. Content, when set,
-// is used instead and Load is not called
+// is used instead and Load is not called.
+//
+// Image and LoadImage supply the content as an 8-bit sRGB image when Content and
+// Load are both nil, with Image placed at Origin and LoadImage returning its own
+// origin as Load does. An *image.NRGBA with no mask, effects or clip-to-below is
+// blended straight into the document without a float buffer, which is cheaper in
+// time and memory and gives the same pixels. Any other image, or a layer that
+// needs its content written to, is converted first. Canvas never writes to an
+// image, so one decoded image can be shared by any number of layers and
+// concurrent renders. A nil or empty image contributes nothing
 type Layer struct {
 	Content     *raster.Buffer
 	Origin      image.Point
 	Load        func() (*raster.Buffer, image.Point, error)
+	Image       image.Image
+	LoadImage   func() (image.Image, image.Point, error)
 	Opacity     float32
 	Mode        blend.Mode
 	Mask        mask.Mask
@@ -177,6 +188,29 @@ func renderLayer(l *Layer, backdrop *raster.Buffer, base *coverage, needBase boo
 			return nil, errors.New("load: returned a buffer whose pixels do not match its size")
 		}
 		own = true
+	}
+	if content == nil && l.Load == nil {
+		img := l.Image
+		if img == nil && l.LoadImage != nil {
+			var err error
+			if img, origin, err = l.LoadImage(); err != nil {
+				return nil, fmt.Errorf("load: %w", err)
+			}
+		}
+		if img != nil && !img.Bounds().Empty() {
+			// A layer that is only blended needs nothing from its image beyond
+			// reading it, so it skips the buffer that a mask, a clip or an
+			// effect would need to write to
+			if n, ok := img.(*image.NRGBA); ok && l.Mask == nil && len(l.Effects) == 0 && !needBase && !(l.ClipToBelow && base != nil) {
+				blend.CompositeNRGBA(backdrop, n, origin, l.Mode, opacityOr(l.Opacity))
+				return nil, nil
+			}
+			var err error
+			if content, err = raster.FromImage(img); err != nil {
+				return nil, fmt.Errorf("load: %w", err)
+			}
+			own = true
+		}
 	}
 	if content == nil {
 		return base, nil

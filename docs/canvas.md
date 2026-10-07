@@ -156,6 +156,41 @@ group composites each one onto the output straight away, so the peak is the
 output plus the layer in flight. An isolated group still holds its own
 document-sized buffer for its children.
 
+## Image layers
+
+A layer whose pixels already exist as an 8-bit `image.Image`, such as a decoded
+PNG, can hand over the image itself.
+
+```go
+&canvas.Layer{Image: frame, Origin: image.Pt(340, 120)}
+
+&canvas.Layer{
+    LoadImage: func() (image.Image, image.Point, error) {
+        return cache.Get("frame.png"), image.Pt(340, 120), nil // image and its origin
+    },
+}
+```
+
+`Image` and `LoadImage` are used when `Content` and `Load` are both nil, in that
+order of preference: `Image` first, then `LoadImage`. `Image` sits at
+`Layer.Origin`, and the point `LoadImage` returns is the origin of a lazy layer,
+as it is for `Load`.
+
+An `*image.NRGBA` layer with no mask, no effects, and no clip-to-below, whose
+next layer is not clipped to it, is blended straight into the document by
+[`blend.CompositeNRGBA`](blend.md#compositenrgba). That skips the document-sized
+float buffer the same layer would otherwise cost, and a pixel with no alpha costs
+almost nothing. The pixels are the same, bit for bit, as converting the image with
+`raster.FromImage` and passing it as `Content`. Any other image type, and any
+layer that has to write to its content, is converted first, and that is the only
+difference.
+
+Canvas never writes to an image, so one decoded image can serve any number of
+layers and any number of concurrent renders. That is the difference from a buffer
+returned by `Load`, which canvas owns and writes to. A nil or empty image
+contributes nothing, and a `LoadImage` error stops the render as a `Load` error
+does.
+
 ## Opacity
 
 `Opacity` is in `(0,1]`, and **a non-positive value is treated as fully opaque**,
@@ -237,7 +272,8 @@ is a compositing-order rule: its coverage depends on the layer stack, which a
 Worth knowing in order, because it explains most ordering questions:
 
 1. **Load** the content, for a lazy layer, then **crop** it to the document if it
-   extends past it.
+   extends past it. An NRGBA [image layer](#image-layers) with nothing to write to
+   skips the remaining steps except compositing and is blended directly.
 2. **Copy** the content, only if it is about to be masked or clipped and it came
    from `Content`, so the caller's buffer is never mutated. A buffer from `Load`
    is already canvas's.
@@ -313,7 +349,9 @@ other content.
 - **`Origin` is where the content's top-left sits.** A buffer that was already `Place`d at a position and also given that `Origin` is offset twice.
 - **A buffer returned by `Load` is written to in place.** Do not return one that
   another layer, another render or the caller still uses.
-- **A lazy layer's position comes from `Load`**, not from `Layer.Origin`.
+- **A lazy layer's position comes from `Load`**, not from `Layer.Origin`. The same
+  holds for `LoadImage`.
+- **`Content` and `Load` win over `Image`.** A layer that sets both draws its buffer.
 - **Opacity 0 means opaque**, not hidden. Omit the layer instead.
 - **A blend mode inside an isolated group cannot see the backdrop.** See
   [groups](#groups).
