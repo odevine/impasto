@@ -6,6 +6,8 @@ import (
 	"image/color"
 	"os"
 
+	"github.com/odevine/impasto/internal/parallel"
+
 	// Register the standard decoders so FromFile handles the common formats
 	_ "image/gif"
 	_ "image/jpeg"
@@ -199,42 +201,49 @@ func (b *Buffer) ToImage(bitDepth int) image.Image {
 	return b.toNRGBA()
 }
 
-// toNRGBA produces dithered 8-bit straight-alpha sRGB output
+// toNRGBA produces dithered 8-bit straight-alpha sRGB output. Rows are
+// converted in parallel bands, which cannot change a pixel since the dither
+// depends only on its position
 func (b *Buffer) toNRGBA() *image.NRGBA {
 	dst := image.NewNRGBA(image.Rect(0, 0, b.Width, b.Height))
-	si := 0
-	for y := 0; y < b.Height; y++ {
-		di := dst.PixOffset(0, y)
-		for x := 0; x < b.Width; x++ {
-			r, g, bl, a := unpremultiply(b.Pix[si], b.Pix[si+1], b.Pix[si+2], b.Pix[si+3])
-			d := ditherOffset(x, y)
-			dst.Pix[di] = encode8(r, d)
-			dst.Pix[di+1] = encode8(g, d)
-			dst.Pix[di+2] = encode8(bl, d)
-			dst.Pix[di+3] = quantize8(a, d)
-			si += 4
-			di += 4
+	parallel.Rows(b.Height, func(lo, hi int) {
+		for y := lo; y < hi; y++ {
+			si := y * b.Width * 4
+			di := dst.PixOffset(0, y)
+			for x := 0; x < b.Width; x++ {
+				r, g, bl, a := unpremultiply(b.Pix[si], b.Pix[si+1], b.Pix[si+2], b.Pix[si+3])
+				d := ditherOffset(x, y)
+				dst.Pix[di] = encode8(r, d)
+				dst.Pix[di+1] = encode8(g, d)
+				dst.Pix[di+2] = encode8(bl, d)
+				dst.Pix[di+3] = quantize8(a, d)
+				si += 4
+				di += 4
+			}
 		}
-	}
+	})
 	return dst
 }
 
-// toNRGBA64 produces undithered 16-bit straight-alpha sRGB output
+// toNRGBA64 produces undithered 16-bit straight-alpha sRGB output, in parallel
+// bands like toNRGBA
 func (b *Buffer) toNRGBA64() *image.NRGBA64 {
 	dst := image.NewNRGBA64(image.Rect(0, 0, b.Width, b.Height))
-	si := 0
-	for y := 0; y < b.Height; y++ {
-		di := dst.PixOffset(0, y)
-		for x := 0; x < b.Width; x++ {
-			r, g, bl, a := unpremultiply(b.Pix[si], b.Pix[si+1], b.Pix[si+2], b.Pix[si+3])
-			put16(dst.Pix[di:], quantize16(LinearToSRGB(r)))
-			put16(dst.Pix[di+2:], quantize16(LinearToSRGB(g)))
-			put16(dst.Pix[di+4:], quantize16(LinearToSRGB(bl)))
-			put16(dst.Pix[di+6:], quantize16(a))
-			si += 4
-			di += 8
+	parallel.Rows(b.Height, func(lo, hi int) {
+		for y := lo; y < hi; y++ {
+			si := y * b.Width * 4
+			di := dst.PixOffset(0, y)
+			for x := 0; x < b.Width; x++ {
+				r, g, bl, a := unpremultiply(b.Pix[si], b.Pix[si+1], b.Pix[si+2], b.Pix[si+3])
+				put16(dst.Pix[di:], quantize16(LinearToSRGB(r)))
+				put16(dst.Pix[di+2:], quantize16(LinearToSRGB(g)))
+				put16(dst.Pix[di+4:], quantize16(LinearToSRGB(bl)))
+				put16(dst.Pix[di+6:], quantize16(a))
+				si += 4
+				di += 8
+			}
 		}
-	}
+	})
 	return dst
 }
 

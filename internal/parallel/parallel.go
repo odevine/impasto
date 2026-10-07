@@ -50,3 +50,17 @@ func Rows(height int, fn func(lo, hi int)) {
 	}
 	wg.Wait()
 }
+
+// RowsAligned is Rows for work on groups of align rows that must not be split,
+// such as 2x2 blocks of pixels. Every band it hands fn starts at a multiple of
+// align, and only the last may end short of one, at height.
+func RowsAligned(height, align int, fn func(lo, hi int)) {
+	if align <= 1 {
+		Rows(height, fn)
+		return
+	}
+	groups := (height + align - 1) / align
+	Rows(groups, func(lo, hi int) {
+		fn(lo*align, min(hi*align, height))
+	})
+}

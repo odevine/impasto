@@ -138,7 +138,8 @@ img := buf.ToImage(8)   // *image.NRGBA, ordered dithering
 img := buf.ToImage(16)  // *image.NRGBA64, no dithering
 ```
 
-Any depth other than 16 is treated as 8.
+Any depth other than 16 is treated as 8. Rows convert in parallel bands, which
+cannot change a pixel since the dither depends only on a pixel's position.
 
 Egress reverses ingest: unpremultiply, encode linear back to sRGB, quantize.
 Values are clamped to `[0,1]` at this point and not before, so an effect that
@@ -158,6 +159,33 @@ so the float32 data stays clean for any further processing.
 
 16-bit output skips it. At 65536 levels the step size is already well below the
 visible threshold, and the noise would be the only thing you gained.
+
+### Getting JPEG planes out
+
+```go
+planes := buf.ToYCbCr()                // flattened over black
+planes := buf.ToYCbCr(color.White)     // flattened over white
+jpeg.Encode(w, planes, &jpeg.Options{Quality: 95})
+```
+
+`ToYCbCr` encodes the buffer as the 8-bit full-range BT.601 planes JPEG stores,
+with each chroma sample averaged over its 2x2 block of pixels, and returns an
+`*image.YCbCr` that `image/jpeg` writes without converting again. That skips the
+RGB image `ToImage` builds and the encoder would convert back, which is most of
+the cost of a JPEG whose pixels are already in a buffer.
+
+A JPEG has no alpha, so the buffer is flattened over a background first. The
+optional argument is that background, and black when it is missing. A background
+with alpha of its own is composited under the buffer and the result is then taken
+over black, so an opaque one is the usual choice.
+
+Two things differ from `ToImage`. The conversion is not dithered, since the
+quantization a JPEG applies would hide it at the cost of a larger file. And it
+reads the sRGB code from a 64 KiB table indexed by the linear value at 16 bits,
+which is several times faster than evaluating the transfer function and can put a
+code one away from the exact encoding where the exact value sits near a rounding
+boundary. Rows convert in parallel bands aligned to the 2x2 blocks, so the result
+does not depend on how many goroutines share the work.
 
 ## Color conversion
 
