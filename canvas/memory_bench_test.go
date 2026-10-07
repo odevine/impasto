@@ -14,15 +14,15 @@ import (
 )
 
 const (
-	cardW, cardH = 3264, 4440
-	textW, textH = 2600, 260
+	sceneW, sceneH = 3264, 4440
+	stripW, stripH = 2600, 260
 )
 
-// sceneKind selects how cardScene supplies its layer content
+// sceneKind selects how layeredScene supplies its layer content
 type sceneKind int
 
 const (
-	// scenePlaced puts every text and icon layer in a document-sized buffer, the
+	// scenePlaced puts every strip and square layer in a document-sized buffer, the
 	// only way to build the scene without Origin
 	scenePlaced sceneKind = iota
 	// sceneBounded gives them their own size and an Origin
@@ -31,10 +31,10 @@ const (
 	sceneLazy
 )
 
-// cardScene builds a document shaped like a card render: eight document-sized
-// layers, ten text-sized layers one of which has a hard offset shadow, and a
-// small icon
-func cardScene(kind sceneKind) *Document {
+// layeredScene builds a print-size document of many layers: eight document-sized
+// layers, ten strip-sized layers one of which has a hard offset shadow, and a
+// small square
+func layeredScene(kind sceneKind) *Document {
 	// sized is a layer of w by h filled with a color at x,y, built up front or on
 	// demand according to the kind
 	sized := func(w, h, x, y int, r, g, b, a float32) *Layer {
@@ -46,12 +46,12 @@ func cardScene(kind sceneKind) *Document {
 		case sceneBounded:
 			return &Layer{Content: fill(w, h, r, g, b, a), Origin: image.Pt(x, y)}
 		default:
-			return &Layer{Content: Place(cardW, cardH, fill(w, h, r, g, b, a), x, y)}
+			return &Layer{Content: Place(sceneW, sceneH, fill(w, h, r, g, b, a), x, y)}
 		}
 	}
 	var layers []Node
 	for i := 0; i < 8; i++ {
-		l := sized(cardW, cardH, 0, 0, 0.1+0.05*float32(i), 0.2, 0.3, 0.3)
+		l := sized(sceneW, sceneH, 0, 0, 0.1+0.05*float32(i), 0.2, 0.3, 0.3)
 		l.Opacity, l.Mode = 0.9, blend.Normal
 		layers = append(layers, l)
 	}
@@ -63,10 +63,10 @@ func cardScene(kind sceneKind) *Document {
 		return l
 	}
 	for i := 0; i < 10; i++ {
-		layers = append(layers, small(textW, textH, 300, 300+i*380, i == 3))
+		layers = append(layers, small(stripW, stripH, 300, 300+i*380, i == 3))
 	}
 	layers = append(layers, small(180, 180, 2900, 4000, false))
-	return &Document{Width: cardW, Height: cardH, Root: Group{PassThrough: true, Layers: layers}}
+	return &Document{Width: sceneW, Height: sceneH, Root: Group{PassThrough: true, Layers: layers}}
 }
 
 // benchPeakHeap renders the document b.N times and reports the highest heap in
@@ -112,13 +112,13 @@ func benchPeakHeap(b *testing.B, d *Document) {
 	mu.Unlock()
 }
 
-// BenchmarkMemoryCardPlaced is the card scene with document-sized text layers
-func BenchmarkMemoryCardPlaced(b *testing.B) { benchPeakHeap(b, cardScene(scenePlaced)) }
+// BenchmarkMemoryPlaced is the layered scene with document-sized strip layers
+func BenchmarkMemoryPlaced(b *testing.B) { benchPeakHeap(b, layeredScene(scenePlaced)) }
 
-// BenchmarkMemoryCardBounded is the card scene with the text and icon layers at
-// their own size
-func BenchmarkMemoryCardBounded(b *testing.B) { benchPeakHeap(b, cardScene(sceneBounded)) }
+// BenchmarkMemoryBounded is the layered scene with the strip and square layers
+// at their own size
+func BenchmarkMemoryBounded(b *testing.B) { benchPeakHeap(b, layeredScene(sceneBounded)) }
 
-// BenchmarkMemoryCardLazy is the bounded scene with every layer built by Load, so
+// BenchmarkMemoryLazy is the bounded scene with every layer built by Load, so
 // only the layer being composited is alive
-func BenchmarkMemoryCardLazy(b *testing.B) { benchPeakHeap(b, cardScene(sceneLazy)) }
+func BenchmarkMemoryLazy(b *testing.B) { benchPeakHeap(b, layeredScene(sceneLazy)) }
