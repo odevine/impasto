@@ -2,6 +2,8 @@ package blend_test
 
 import (
 	"fmt"
+	"image"
+	"image/color"
 
 	"github.com/odevine/impasto/blend"
 	"github.com/odevine/impasto/raster"
@@ -59,4 +61,53 @@ func ExampleMode() {
 	// Output:
 	// Normal SoftLight Luminosity
 	// false Mode(invalid)
+}
+
+// CompositeNRGBA blends a decoded 8-bit image straight into a buffer, with no
+// float copy of the image in between. A transparent pixel leaves the backdrop
+// alone, and an opaque one covers it
+func ExampleCompositeNRGBA() {
+	dst := raster.MustNewBuffer(2, 1)
+	dst.Set(0, 0, 0.5, 0.5, 0.5, 1)
+	dst.Set(1, 0, 0.5, 0.5, 0.5, 1)
+
+	src := image.NewNRGBA(image.Rect(0, 0, 2, 1))
+	src.SetNRGBA(1, 0, color.NRGBA{R: 255, G: 255, B: 255, A: 255}) // pixel 0 stays transparent
+
+	blend.CompositeNRGBA(dst, src, image.Point{}, blend.Normal, 1)
+	for x := 0; x < 2; x++ {
+		r, _, _, _ := dst.At(x, 0)
+		fmt.Printf("pixel %d: %.2f\n", x, r)
+	}
+	// Output:
+	// pixel 0: 0.50
+	// pixel 1: 1.00
+}
+
+// Index records where an image's visible pixels are, so a frame that is mostly
+// transparent is blended in proportion to what it draws. Build the index once
+// where the decoded image is kept and reuse it. The result is identical to
+// CompositeNRGBA
+func ExampleIndex() {
+	frame := image.NewNRGBA(image.Rect(0, 0, 200, 100))
+	for y := 0; y < 100; y++ {
+		for x := 0; x < 200; x++ {
+			if x < 10 || x >= 190 || y < 10 || y >= 90 {
+				frame.SetNRGBA(x, y, color.NRGBA{R: 255, A: 255})
+			}
+		}
+	}
+	indexed := blend.Index(frame)
+
+	plain := raster.MustNewBuffer(200, 100)
+	fast := raster.MustNewBuffer(200, 100)
+	blend.CompositeNRGBA(plain, frame, image.Point{}, blend.Normal, 1)
+	blend.CompositeIndexed(fast, indexed, image.Point{}, blend.Normal, 1)
+
+	same := true
+	for i := range plain.Pix {
+		same = same && plain.Pix[i] == fast.Pix[i]
+	}
+	fmt.Println("identical:", same)
+	// Output: identical: true
 }

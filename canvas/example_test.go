@@ -2,6 +2,7 @@ package canvas_test
 
 import (
 	"fmt"
+	"image"
 	"image/color"
 
 	"github.com/odevine/impasto/blend"
@@ -60,4 +61,30 @@ func Example() {
 	img := out.ToImage(8)
 	fmt.Printf("rendered %dx%d\n", img.Bounds().Dx(), img.Bounds().Dy())
 	// Output: rendered 200x120
+}
+
+// A layer can take a decoded 8-bit image as it is, through Image or LoadImage.
+// It is blended without being converted to a float buffer first, and the same
+// image can be shared by any number of layers and renders
+func ExampleLayer_image() {
+	frame := image.NewNRGBA(image.Rect(0, 0, 2, 2))
+	for i := range frame.Pix {
+		frame.Pix[i] = 255 // opaque white
+	}
+
+	doc := &canvas.Document{Width: 4, Height: 4, Root: canvas.Group{PassThrough: true, Layers: []canvas.Node{
+		&canvas.Layer{Content: raster.MustNewBuffer(4, 4)},
+		&canvas.Layer{Image: frame, Origin: image.Pt(1, 1)},
+		&canvas.Layer{LoadImage: func() (image.Image, image.Point, error) { return frame, image.Pt(3, 3), nil }},
+	}}}
+	out := canvas.MustRender(doc)
+
+	for _, p := range [][2]int{{0, 0}, {1, 1}, {3, 3}} {
+		_, _, _, a := out.At(p[0], p[1])
+		fmt.Printf("(%d,%d) alpha %.0f\n", p[0], p[1], a)
+	}
+	// Output:
+	// (0,0) alpha 0
+	// (1,1) alpha 1
+	// (3,3) alpha 1
 }

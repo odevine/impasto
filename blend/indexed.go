@@ -61,10 +61,6 @@ func Index(img *image.NRGBA) *Indexed {
 	return ix
 }
 
-// Runs reports how many runs of visible pixels the index holds, summed over
-// every row
-func (ix *Indexed) Runs() int { return len(ix.runs) / 2 }
-
 // CompositeIndexed is CompositeNRGBA for an image whose visible pixels have been
 // indexed. It blends only the runs the index lists, which gives the same result
 // as blending every pixel, since a pixel with no alpha leaves the backdrop alone
