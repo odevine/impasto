@@ -132,6 +132,34 @@ blend the rest through `BlendPixel`.
 once. Its bounds need not start at the origin, and a sub-image is read where it
 sits in its parent.
 
+### Indexed and CompositeIndexed
+
+```go
+ix := blend.Index(img)                                   // once per decoded image
+blend.CompositeIndexed(dst, ix, origin, m, opacity)      // as often as you like
+```
+
+`Index` reads an `*image.NRGBA` once and records, for each row, the runs of
+columns that have any alpha. `CompositeIndexed` then blends only those runs, so
+its cost follows the visible area and not the rectangle. The result is
+bit-identical to `CompositeNRGBA`, because a pixel with no alpha leaves the
+backdrop alone in every mode.
+
+An image that is a frame, a hollow outline or a cut-out is mostly transparent,
+and a single bounding box does not help it, since every middle row has pixels at
+both ends. That is why the index holds runs and not one extent per row. Two
+visible stretches separated by fewer than 32 transparent pixels are merged into
+one run, which costs less to blend through than to skip. On a 2048 by 2048 frame
+with a 60 pixel border, blending takes 0.94 ms indexed against 3.26 ms plain.
+
+`Indexed` embeds the `*image.NRGBA` and is one, so it can go anywhere an image
+can, including `canvas.Layer.Image`. It belongs to the pixels as they were when
+`Index` read them, so write to the image afterward and the index is wrong. Build
+it once where the decoded image is kept, since one pass over a 3264 by 4440 image
+takes about 7.5 ms, and share it freely, because nothing writes to it. An image
+that is fully opaque or fully detailed gains nothing, and an index of it holds one
+run per row.
+
 ## The modes
 
 Values are a fixed `iota` ordering that is part of the API. You can persist the
