@@ -76,6 +76,22 @@ func ExampleBuffer_ToImage() {
 	// *image.NRGBA64 (0,0)-(2,2)
 }
 
+// ToYCbCr encodes for a JPEG: the planes image/jpeg stores, with alpha flattened
+// over a background that is black unless one is given
+func ExampleBuffer_ToYCbCr() {
+	buf := raster.MustNewBuffer(2, 2) // fully transparent
+
+	onBlack := buf.ToYCbCr()
+	onWhite := buf.ToYCbCr(color.White)
+	fmt.Printf("%T %v\n", onBlack, onBlack.Bounds())
+	fmt.Printf("over black: Y=%d\n", onBlack.Y[0])
+	fmt.Printf("over white: Y=%d\n", onWhite.Y[0])
+	// Output:
+	// *image.YCbCr (0,0)-(2,2)
+	// over black: Y=0
+	// over white: Y=255
+}
+
 // The sRGB transfer functions are exported for callers that need to convert a
 // single value, such as when building a color constant by hand
 func ExampleSRGBToLinear() {

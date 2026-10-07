@@ -6,53 +6,12 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/odevine/impasto/internal/testimg"
 	"github.com/odevine/impasto/raster"
 )
 
-// sparse is an image whose rows hold stretches of visible pixels separated by
-// gaps that are shorter than, equal to and longer than the merge distance, plus
-// rows that are empty and rows that are full
-func sparse(w, h int) *image.NRGBA {
-	img := image.NewNRGBA(image.Rect(0, 0, w, h))
-	set := func(x, y int, a uint8) {
-		img.SetNRGBA(x, y, color.NRGBA{R: uint8(x*13 + y), G: uint8(y * 7), B: uint8(x + 40), A: a})
-	}
-	for y := 0; y < h; y++ {
-		switch y % 6 {
-		case 0: // empty
-		case 1: // full and opaque
-			for x := 0; x < w; x++ {
-				set(x, y, 255)
-			}
-		case 2: // two strips, a gap of minGap-1 between them
-			for x := 3; x < 10; x++ {
-				set(x, y, 200)
-			}
-			for x := 10 + minGap - 1; x < 10+minGap+9; x++ {
-				set(x, y, 90)
-			}
-		case 3: // two strips, a gap of exactly minGap between them
-			for x := 3; x < 10; x++ {
-				set(x, y, 255)
-			}
-			for x := 10 + minGap; x < 10+minGap+9; x++ {
-				set(x, y, 255)
-			}
-		case 4: // a ring: a strip at each end and nothing between
-			for x := 0; x < 5; x++ {
-				set(x, y, 255)
-				set(w-1-x, y, 128)
-			}
-		case 5: // lone pixels, one with the faintest alpha
-			set(w/3, y, 1)
-			set(w-1, y, 255)
-		}
-	}
-	return img
-}
-
 func TestIndexListsTheVisibleRuns(t *testing.T) {
-	img := sparse(120, 12)
+	img := testimg.Sparse(120, 12, minGap)
 	ix := Index(img)
 	row := func(y int) []int32 { return ix.runs[2*ix.rows[y] : 2*ix.rows[y+1]] }
 	for y, want := range map[int][]int32{
@@ -69,13 +28,10 @@ func TestIndexListsTheVisibleRuns(t *testing.T) {
 			t.Errorf("row %d runs = %v, want %v", y, got, want)
 		}
 	}
-	if ix.Runs() == 0 {
-		t.Error("Runs is zero")
-	}
 }
 
 func TestIndexReadsASubImageAtItsOwnBounds(t *testing.T) {
-	full := sparse(120, 12)
+	full := testimg.Sparse(120, 12, minGap)
 	sub := full.SubImage(image.Rect(10, 1, 110, 5)).(*image.NRGBA)
 	ix := Index(sub)
 	if len(ix.rows) != 5 {
@@ -89,7 +45,7 @@ func TestIndexReadsASubImageAtItsOwnBounds(t *testing.T) {
 
 func TestCompositeIndexedMatchesTheBufferPath(t *testing.T) {
 	const w, h = 150, 40
-	src := sparse(131, 29)
+	src := testimg.Sparse(131, 29, minGap)
 	ix := Index(src)
 	buf, err := raster.FromImage(src)
 	if err != nil {
@@ -111,7 +67,7 @@ func TestCompositeIndexedMatchesTheBufferPath(t *testing.T) {
 }
 
 func TestCompositeIndexedReadsASubImageWhereItSits(t *testing.T) {
-	full := sparse(120, 24)
+	full := testimg.Sparse(120, 24, minGap)
 	sub := full.SubImage(image.Rect(7, 3, 100, 20)).(*image.NRGBA)
 	buf, _ := raster.FromImage(sub)
 	ix := Index(sub)
@@ -125,36 +81,57 @@ func TestCompositeIndexedReadsASubImageWhereItSits(t *testing.T) {
 
 func TestCompositeIndexedSkipsAnImageWithNothingVisible(t *testing.T) {
 	ix := Index(image.NewNRGBA(image.Rect(0, 0, 50, 50)))
-	if ix.Runs() != 0 {
-		t.Fatalf("Runs = %d for a transparent image", ix.Runs())
+	if len(ix.runs) != 0 {
+		t.Fatalf("a transparent image has %d runs", len(ix.runs)/2)
 	}
 	want, got := backdrop(60, 60), backdrop(60, 60)
 	CompositeIndexed(got, ix, image.Pt(3, 3), Normal, 1)
 	sameBits(t, got, want, "transparent image")
 }
 
-func TestCompositeIndexedIgnoresNonPositiveOpacity(t *testing.T) {
-	ix := Index(sparse(60, 30))
+func TestCompositeIndexedIgnoresNonPositiveOpacityAndClampsAboveOne(t *testing.T) {
+	src := testimg.Sparse(60, 30, minGap)
+	ix := Index(src)
 	want, got := backdrop(70, 40), backdrop(70, 40)
-	CompositeIndexed(got, ix, image.Point{}, Normal, 0)
-	sameBits(t, got, want, "opacity 0")
+	for _, o := range []float32{0, -1} {
+		CompositeIndexed(got, ix, image.Point{}, Normal, o)
+		sameBits(t, got, want, "non-positive opacity")
+	}
+	CompositeNRGBA(want, src, image.Point{}, Normal, 1)
+	CompositeIndexed(got, ix, image.Point{}, Normal, 4)
+	sameBits(t, got, want, "opacity above one")
 }
 
-// hollowImage is a frame of the given thickness, transparent inside
-func hollowImage(w, h, thickness int) *image.NRGBA {
-	img := image.NewNRGBA(image.Rect(0, 0, w, h))
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			if x < thickness || y < thickness || x >= w-thickness || y >= h-thickness {
-				img.SetNRGBA(x, y, color.NRGBA{R: uint8(x), G: uint8(y), B: 90, A: 255})
-			}
+// An index of a fully opaque image holds one run per row, and of a transparent one
+// none
+func TestIndexOfASolidImageIsOneRunPerRow(t *testing.T) {
+	ix := Index(testimg.Solid(50, 20, 255))
+	if len(ix.runs) != 2*20 {
+		t.Errorf("runs = %d, want %d", len(ix.runs)/2, 20)
+	}
+}
+
+// Both blend packages keep their own table of 8-bit sRGB codes, so every code
+// must come out as raster.FromImage reads it
+func TestSRGBTableMatchesIngest(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 256, 1))
+	for c := 0; c < 256; c++ {
+		img.SetNRGBA(c, 0, color.NRGBA{R: uint8(c), G: uint8(255 - c), B: uint8(c), A: 255})
+	}
+	buf, err := raster.FromImage(img)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for c := 0; c < 256; c++ {
+		r, g, b, a := buf.At(c, 0)
+		if r != srgb8ToLinear[c] || g != srgb8ToLinear[255-c] || b != srgb8ToLinear[c] || a != 1 {
+			t.Fatalf("code %d reads as %v %v %v %v, table has %v %v", c, r, g, b, a, srgb8ToLinear[c], srgb8ToLinear[255-c])
 		}
 	}
-	return img
 }
 
 func BenchmarkCompositeHollowFrame(b *testing.B) {
-	frame := hollowImage(2048, 2048, 60)
+	frame := testimg.Hollow(2048, 2048, 60)
 	ix := Index(frame)
 	dst := raster.MustNewBuffer(2048, 2048)
 	b.Run("nrgba", func(b *testing.B) {
@@ -170,7 +147,7 @@ func BenchmarkCompositeHollowFrame(b *testing.B) {
 }
 
 func BenchmarkIndex(b *testing.B) {
-	frame := hollowImage(3264, 4440, 100)
+	frame := testimg.Hollow(3264, 4440, 100)
 	b.SetBytes(int64(len(frame.Pix)))
 	for b.Loop() {
 		Index(frame)

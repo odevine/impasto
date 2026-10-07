@@ -140,6 +140,7 @@ func TestToYCbCrFlattensOverABackground(t *testing.T) {
 	// The default is black, and black says the same thing
 	sameYCbCr(t, buf.ToYCbCr(color.Black), black, "explicit black")
 	sameYCbCr(t, buf.ToYCbCr(nil), black, "nil background")
+	sameYCbCr(t, buf.ToYCbCr(color.Transparent), black, "transparent background")
 	// A mid-gray lands between
 	gray := buf.ToYCbCr(color.NRGBA{R: 128, G: 128, B: 128, A: 255})
 	if y := gray.Y[1*gray.YStride+1]; y != 128 {

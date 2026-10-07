@@ -4,30 +4,18 @@ import (
 	"errors"
 	"image"
 	"image/color"
-	"math"
 	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/odevine/impasto/blend"
 	"github.com/odevine/impasto/effects"
+	"github.com/odevine/impasto/internal/testimg"
 	"github.com/odevine/impasto/mask"
 	"github.com/odevine/impasto/raster"
 )
 
 const imgDocW, imgDocH = 64, 48
-
-// imagePattern is an image with transparent, opaque and partial pixels
-func imagePattern(w, h int) *image.NRGBA {
-	img := image.NewNRGBA(image.Rect(0, 0, w, h))
-	alphas := []uint8{0, 255, 128, 1, 254, 77, 0, 255, 200}
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			img.SetNRGBA(x, y, color.NRGBA{R: uint8(x*37 + y*5), G: uint8(y*23 + x), B: uint8(x*y + 9), A: alphas[(x*3+y*7)%len(alphas)]})
-		}
-	}
-	return img
-}
 
 // below is a layer under the one being tested, so a blend has a backdrop
 func below() *Layer { return &Layer{Content: fill(imgDocW, imgDocH, 0.4, 0.5, 0.2, 0.7)} }
@@ -46,11 +34,7 @@ func renderBoth(t *testing.T, mk func(viaImage bool) []Node) (viaBuffer, viaImag
 
 func equalBits(t *testing.T, got, want *raster.Buffer, what string) {
 	t.Helper()
-	for i := range want.Pix {
-		if math.Float32bits(got.Pix[i]) != math.Float32bits(want.Pix[i]) {
-			t.Fatalf("%s: value %d (pixel %d, channel %d) = %v, want %v", what, i, i/4, i%4, got.Pix[i], want.Pix[i])
-		}
-	}
+	testimg.EqualBits(t, got.Pix, want.Pix, what)
 }
 
 // imageLayer is one layer built either from the converted buffer or from the
@@ -73,7 +57,7 @@ func imageLayerFor(img image.Image, at image.Point, viaImage bool, set func(*Lay
 }
 
 func TestImageLayerRendersLikeItsBuffer(t *testing.T) {
-	img := imagePattern(37, 29)
+	img := testimg.Patterned(37, 29)
 	for m := blend.Normal; m <= blend.Luminosity; m++ {
 		for _, op := range []float32{0, 0.5, 1} {
 			for _, at := range []image.Point{{0, 0}, {9, 6}, {-6, -4}, {50, 40}} {
@@ -89,7 +73,7 @@ func TestImageLayerRendersLikeItsBuffer(t *testing.T) {
 // Anything that writes to the content, or needs its coverage, converts the image
 // first and must still agree with the buffer path
 func TestImageLayerFallbacksRenderLikeTheirBuffer(t *testing.T) {
-	img := imagePattern(37, 29)
+	img := testimg.Patterned(37, 29)
 	cases := map[string]func(viaImage bool) []Node{
 		"mask": func(v bool) []Node {
 			return []Node{below(), imageLayerFor(img, image.Pt(8, 5), v, func(l *Layer) {
@@ -116,7 +100,7 @@ func TestImageLayerFallbacksRenderLikeTheirBuffer(t *testing.T) {
 }
 
 func TestImageLayerOfAnotherTypeRendersLikeItsBuffer(t *testing.T) {
-	nrgba := imagePattern(20, 16)
+	nrgba := testimg.Patterned(20, 16)
 	rgba := image.NewRGBA(nrgba.Rect)
 	gray := image.NewGray(nrgba.Rect)
 	for y := 0; y < 16; y++ {
@@ -134,7 +118,7 @@ func TestImageLayerOfAnotherTypeRendersLikeItsBuffer(t *testing.T) {
 }
 
 func TestLoadImageIsCalledOnceAndSuppliesItsOrigin(t *testing.T) {
-	img := imagePattern(20, 16)
+	img := testimg.Patterned(20, 16)
 	calls := 0
 	lazy := &Layer{Origin: image.Pt(40, 40), LoadImage: func() (image.Image, image.Point, error) {
 		calls++
@@ -157,7 +141,7 @@ func TestLoadImageErrorStopsTheRender(t *testing.T) {
 	doc := &Document{Width: imgDocW, Height: imgDocH, Root: Group{PassThrough: true, Layers: []Node{
 		below(),
 		&Layer{LoadImage: func() (image.Image, image.Point, error) { return nil, image.Point{}, boom }},
-		&Layer{LoadImage: func() (image.Image, image.Point, error) { later++; return imagePattern(4, 4), image.Point{}, nil }},
+		&Layer{LoadImage: func() (image.Image, image.Point, error) { later++; return testimg.Patterned(4, 4), image.Point{}, nil }},
 	}}}
 	out, err := Render(doc)
 	if out != nil || !errors.Is(err, boom) || !strings.Contains(err.Error(), "layer 1") || later != 0 {
@@ -182,7 +166,7 @@ func TestEmptyImagesContributeNothing(t *testing.T) {
 
 // Content and Load come first, so a layer that sets an image too draws its buffer
 func TestBufferContentWinsOverAnImage(t *testing.T) {
-	img := imagePattern(12, 12)
+	img := testimg.Patterned(12, 12)
 	buf := fill(8, 8, 0.1, 0.9, 0.3, 1)
 	want, err := Render(&Document{Width: imgDocW, Height: imgDocH, Root: Group{PassThrough: true, Layers: []Node{below(), &Layer{Content: buf}}}})
 	if err != nil {
@@ -202,7 +186,7 @@ func TestBufferContentWinsOverAnImage(t *testing.T) {
 
 // An image is never written to, even by a layer that is masked or has effects
 func TestRenderLeavesImagesAlone(t *testing.T) {
-	img := imagePattern(30, 24)
+	img := testimg.Patterned(30, 24)
 	pix := append([]uint8(nil), img.Pix...)
 	for _, set := range []func(*Layer){
 		nil,
@@ -229,7 +213,7 @@ func TestRenderLeavesImagesAlone(t *testing.T) {
 // Banding must not change a pixel, so the result is the same however many
 // goroutines share the work
 func TestImageLayerIsIndependentOfParallelism(t *testing.T) {
-	img := imagePattern(61, 45)
+	img := testimg.Patterned(61, 45)
 	render := func(procs int) *raster.Buffer {
 		defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(procs))
 		layers := []Node{&Layer{Content: fill(200, 400, 0.4, 0.5, 0.2, 0.7)}}
@@ -248,23 +232,9 @@ func TestImageLayerIsIndependentOfParallelism(t *testing.T) {
 	}
 }
 
-// sparsePattern is an image with wide transparent stretches in its rows, so an
-// index has runs to skip
-func sparsePattern(w, h int) *image.NRGBA {
-	img := image.NewNRGBA(image.Rect(0, 0, w, h))
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			if y%5 == 0 || x < 4 || x >= w-4 || (x > w/2-3 && x < w/2+3) {
-				img.SetNRGBA(x, y, color.NRGBA{R: uint8(x * 9), G: uint8(y * 5), B: 77, A: uint8(40 + (x+y)%200)})
-			}
-		}
-	}
-	return img
-}
-
 func TestIndexedLayerRendersLikeItsBuffer(t *testing.T) {
 	const big = 200
-	img := sparsePattern(190, 150)
+	img := testimg.Sparse(190, 150, 32)
 	ix := blend.Index(img)
 	for m := blend.Normal; m <= blend.Luminosity; m++ {
 		for _, at := range []image.Point{{0, 0}, {5, 9}, {-30, -20}, {120, 100}} {
@@ -289,7 +259,7 @@ func TestIndexedLayerRendersLikeItsBuffer(t *testing.T) {
 // A layer that has to write to its content converts the image, and an index
 // does not change what it converts
 func TestIndexedLayerFallbacksRenderLikeTheirBuffer(t *testing.T) {
-	img := sparsePattern(60, 40)
+	img := testimg.Sparse(60, 40, 32)
 	ix := blend.Index(img)
 	for name, set := range map[string]func(*Layer){
 		"mask": func(l *Layer) { l.Mask = mask.FuncMask(func(x, y int) float32 { return float32((x+y)%4) / 3 }) },
@@ -311,5 +281,20 @@ func TestIndexedLayerFallbacksRenderLikeTheirBuffer(t *testing.T) {
 		want := render(func() *Layer { return &Layer{Content: buf, Origin: image.Pt(2, 3)} })
 		got := render(func() *Layer { return &Layer{Image: ix, Origin: image.Pt(2, 3)} })
 		equalBits(t, got, want, name)
+	}
+}
+
+// An image too wide to convert is reported as a load error where a conversion is
+// needed, and blended without one where it is not
+func TestImageTooWideToConvert(t *testing.T) {
+	wide := image.NewNRGBA(image.Rect(0, 0, raster.MaxDimension+1, 1))
+	masked := &Layer{Image: wide, Mask: mask.FuncMask(func(x, y int) float32 { return 1 })}
+	_, err := Render(&Document{Width: imgDocW, Height: imgDocH, Root: Group{PassThrough: true, Layers: []Node{masked}}})
+	if err == nil || !strings.Contains(err.Error(), "load") || !errors.Is(err, raster.ErrDimensions) {
+		t.Fatalf("masked wide image error = %v, want a load error wrapping ErrDimensions", err)
+	}
+	// Blended directly it is only read, so its size does not matter
+	if _, err := Render(&Document{Width: imgDocW, Height: imgDocH, Root: Group{PassThrough: true, Layers: []Node{&Layer{Image: wide}}}}); err != nil {
+		t.Errorf("a wide image blended directly failed: %v", err)
 	}
 }

@@ -2,30 +2,11 @@ package blend
 
 import (
 	"image"
-	"image/color"
-	"math"
 	"testing"
 
+	"github.com/odevine/impasto/internal/testimg"
 	"github.com/odevine/impasto/raster"
 )
-
-// patterned is an image whose alpha takes the values the fast paths branch on,
-// transparent, opaque and partial, spread across its pixels
-func patterned(w, h int) *image.NRGBA {
-	img := image.NewNRGBA(image.Rect(0, 0, w, h))
-	alphas := []uint8{0, 255, 128, 1, 254, 77, 0, 255, 200}
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			img.SetNRGBA(x, y, color.NRGBA{
-				R: uint8(x*37 + y*5),
-				G: uint8(y*23 + x),
-				B: uint8(x*y + 9),
-				A: alphas[(x*3+y*7)%len(alphas)],
-			})
-		}
-	}
-	return img
-}
 
 // backdrop is a buffer with a color and alpha that vary, so a blend has
 // something to differ from
@@ -42,16 +23,12 @@ func backdrop(w, h int) *raster.Buffer {
 
 func sameBits(t *testing.T, got, want *raster.Buffer, what string) {
 	t.Helper()
-	for i := range want.Pix {
-		if math.Float32bits(got.Pix[i]) != math.Float32bits(want.Pix[i]) {
-			t.Fatalf("%s: value %d (pixel %d, channel %d) = %v, want %v", what, i, i/4, i%4, got.Pix[i], want.Pix[i])
-		}
-	}
+	testimg.EqualBits(t, got.Pix, want.Pix, what)
 }
 
 func TestCompositeNRGBAMatchesBuffer(t *testing.T) {
 	const w, h = 48, 36
-	src := patterned(31, 23)
+	src := testimg.Patterned(31, 23)
 	buf, err := raster.FromImage(src)
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +47,7 @@ func TestCompositeNRGBAMatchesBuffer(t *testing.T) {
 }
 
 func TestCompositeNRGBAReadsASubImageAtItsOwnBounds(t *testing.T) {
-	full := patterned(40, 30)
+	full := testimg.Patterned(40, 30)
 	sub := full.SubImage(image.Rect(7, 5, 29, 24)).(*image.NRGBA)
 	buf, err := raster.FromImage(sub)
 	if err != nil {
@@ -85,7 +62,7 @@ func TestCompositeNRGBAReadsASubImageAtItsOwnBounds(t *testing.T) {
 }
 
 func TestCompositeNRGBATouchesOnlyItsRect(t *testing.T) {
-	src := patterned(10, 8)
+	src := testimg.Patterned(10, 8)
 	want, got := backdrop(30, 30), backdrop(30, 30)
 	CompositeNRGBA(got, src, image.Pt(12, 9), Normal, 1)
 	for y := 0; y < 30; y++ {
@@ -103,7 +80,7 @@ func TestCompositeNRGBATouchesOnlyItsRect(t *testing.T) {
 }
 
 func TestCompositeNRGBAIgnoresNonPositiveOpacityAndClampsAboveOne(t *testing.T) {
-	src := patterned(10, 8)
+	src := testimg.Patterned(10, 8)
 	before := backdrop(20, 20)
 	for _, o := range []float32{0, -1} {
 		got := backdrop(20, 20)
@@ -117,7 +94,7 @@ func TestCompositeNRGBAIgnoresNonPositiveOpacityAndClampsAboveOne(t *testing.T) 
 }
 
 func TestCompositeNRGBANeverWritesToItsSource(t *testing.T) {
-	src := patterned(16, 16)
+	src := testimg.Patterned(16, 16)
 	pix := append([]uint8(nil), src.Pix...)
 	CompositeNRGBA(backdrop(20, 20), src, image.Point{}, Overlay, 0.5)
 	for i := range pix {
@@ -128,7 +105,7 @@ func TestCompositeNRGBANeverWritesToItsSource(t *testing.T) {
 }
 
 func BenchmarkCompositeNRGBA(b *testing.B) {
-	src := patterned(2048, 2048)
+	src := testimg.Patterned(2048, 2048)
 	dst := raster.MustNewBuffer(2048, 2048)
 	b.SetBytes(2048 * 2048 * 4)
 	for i := 0; i < b.N; i++ {
@@ -137,7 +114,7 @@ func BenchmarkCompositeNRGBA(b *testing.B) {
 }
 
 func BenchmarkCompositeRectFromImage(b *testing.B) {
-	src := patterned(2048, 2048)
+	src := testimg.Patterned(2048, 2048)
 	dst := raster.MustNewBuffer(2048, 2048)
 	b.SetBytes(2048 * 2048 * 4)
 	for i := 0; i < b.N; i++ {
