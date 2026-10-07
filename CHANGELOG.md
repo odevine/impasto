@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.2](https://github.com/odevine/impasto/compare/v0.2.1...v0.2.2) (2026-10-07)
+
+
+### Features
+
+* **raster:** add ToYCbCr for JPEG output and convert in parallel ([df9b688](https://github.com/odevine/impasto/commit/df9b6886381bc70f9288f655ddb84ef0291575a1))
+
+
+### Performance Improvements
+
+* **blend:** index an image's visible runs to skip transparent pixels ([0d7767d](https://github.com/odevine/impasto/commit/0d7767d8c9e4d8ca72d53c9e6b3c2111a3aa0d2d))
+* **canvas:** blend 8-bit image layers without a float buffer ([0b3bf71](https://github.com/odevine/impasto/commit/0b3bf71f8e373c49d7e9e01ff4e722decd45655d))
+
 ## [0.2.1](https://github.com/odevine/impasto/compare/v0.2.0...v0.2.1) (2026-10-06)
 
 
